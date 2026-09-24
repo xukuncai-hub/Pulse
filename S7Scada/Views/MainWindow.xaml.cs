@@ -1,12 +1,16 @@
+using System.Diagnostics;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text.Json;
-using System.Windows;
-using System.Windows.Interop;
-using System.Windows.Media;
+using Microsoft.UI.Windowing;
+using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Media;
 using Microsoft.Web.WebView2.Core;
 using S7Scada.Models;
 using S7Scada.Services;
+using Windows.Foundation;
+using Windows.Graphics;
+using WinRT.Interop;
 
 namespace S7Scada.Views;
 
@@ -29,18 +33,78 @@ public partial class MainWindow : Window
     private const int DWMWA_USE_IMMERSIVE_DARK_MODE = 20;
     private const int DWMWA_CAPTION_COLOR = 35;
     private const int DWMWA_TEXT_COLOR = 36;
+    private const int DWMWA_BORDER_COLOR = 34;
 
     public MainWindow(PlcService plc, TagConfigService configService)
     {
         _plc = plc;
         _configService = configService;
         InitializeComponent();
-        SourceInitialized += (s, e) => SetTitlebarTheme(false); // 默认浅色，theme 消息会再设置
+        MakeBorderless();
+        ApplyAppIcon();
+        SizeAndCenterWindow();
+
+        // 窗口尺寸/状态变化时（最大化、还原、拖边缩放）重新告知前端按钮区宽度
+        AppWindow.Changed += (_, args) =>
+        {
+            if (args.DidPresenterChange || args.DidSizeChange)
+                DispatcherQueue.TryEnqueue(PushWindowMetrics);
+        };
     }
+
+    /// <summary>把"系统窗口按钮实际占用的宽度"告诉前端，避免工具栏内容压到按钮下面。
+    /// 这个宽度由平台给出（DPI、窗口状态、语言方向都会影响），不能用固定值。</summary>
+    private void PushWindowMetrics()
+    {
+        try
+        {
+            // RightInset 单位为逻辑像素，与前端 CSS px 同一坐标系，可直接用
+            SendToJs(new { type = "windowMetrics", rightInset = AppWindow.TitleBar.RightInset });
+        }
+        catch { }
+    }
+
+    /// <summary>设置窗口/任务栏图标（WinUI 的 Window 没有 Icon 属性，用 AppWindow.SetIcon）</summary>
+    private void ApplyAppIcon()
+    {
+        try
+        {
+            var ico = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Assets", "AppIcon.ico");
+            if (File.Exists(ico))
+                AppWindow.SetIcon(ico);
+        }
+        catch
+        {
+            // 图标缺失不影响功能
+        }
+    }
+
+    /// <summary>把内容扩展到标题栏区域，并释放系统自带的窗口按钮
+    /// （最小化/最大化/关闭直接用系统原生按钮：原生 hover、最大↔还原图标自动切换、Snap 布局都在）。
+    /// 窗口拖动仍由前端的 app-region: drag 负责（见 WebView2 非客户区支持）。</summary>
+    private void MakeBorderless()
+    {
+        try
+        {
+            var appWindow = AppWindow;
+            appWindow.TitleBar.ExtendsContentIntoTitleBar = true;
+
+            // 系统按钮背景透明，让它直接落在工具栏底色上（避免出现按钮方块）
+            appWindow.TitleBar.ButtonBackgroundColor = Microsoft.UI.Colors.Transparent;
+            appWindow.TitleBar.ButtonInactiveBackgroundColor = Microsoft.UI.Colors.Transparent;
+
+            // 只保留前端自绘的拖拽区，系统标题栏本身不提供拖拽矩形
+            appWindow.TitleBar.SetDragRectangles([]);
+        }
+        catch { }
+    }
+
+    /// <summary>App 在 Activate() 之后调用（此时 hwnd 才有效）。默认浅色，theme 消息会再设置。</summary>
+    public void ApplyInitialTitlebarTheme() => SetTitlebarTheme(false);
 
     private void SetTitlebarTheme(bool dark)
     {
-        var hwnd = new WindowInteropHelper(this).Handle;
+        var hwnd = WindowNative.GetWindowHandle(this);
 
         // 沉浸式深色标题栏（Win10 1809+）
         if (Environment.OSVersion.Version.Build >= 17763)
@@ -54,13 +118,35 @@ public partial class MainWindow : Window
         {
             int caption = dark ? 0x17110D : 0xFBF9F8; // #0d1117 / #f8f9fb
             int text = dark ? 0xF3EDE6 : 0x6A6057;    // #e6edf3 / #57606a
+            // 自绘标题栏窗口的四周仍由 DWM 画窗框，不设置时是纯黑色（浅色主题下非常明显）
+            int border = dark ? 0x1A1512 : 0xFFFFFF;  // #12151a / #ffffff，与工具栏、状态栏同色
             DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, ref caption, sizeof(int));
             DwmSetWindowAttribute(hwnd, DWMWA_TEXT_COLOR, ref text, sizeof(int));
+            DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, ref border, sizeof(int));
+        }
+    }
+
+    private void SizeAndCenterWindow()
+    {
+        try
+        {
+            var appWindow = AppWindow;
+            appWindow.Resize(new SizeInt32(1200, 800));
+
+            var area = DisplayArea.GetFromWindowId(appWindow.Id, DisplayAreaFallback.Primary);
+            var wa = area.WorkArea;
+            appWindow.Move(new PointInt32(
+                wa.X + (wa.Width - appWindow.Size.Width) / 2,
+                wa.Y + (wa.Height - appWindow.Size.Height) / 2));
+        }
+        catch
+        {
+            // AppWindow 尚未就绪时忽略，窗口保持默认大小
         }
     }
 
     // ── Initialization ──────────────────────────────────────
-    // Called from App.OnStartup after Show(). Full sequence:
+    // Called from App.OnLaunched after Show(). Full sequence:
     // load tags -> init WebView2 -> wait for page navigation (so the
     // JS message listener is registered) -> push the tag list.
 
@@ -75,6 +161,7 @@ public partial class MainWindow : Window
         await InitializeWebView();
 
         // Now the frontend is listening; push the initial tag list and screens.
+        PushWindowMetrics();
         await PushTagsToJs();
         PushScreensToJs();
     }
@@ -96,28 +183,40 @@ public partial class MainWindow : Window
 
     private async Task InitializeWebView()
     {
-        var env = await CoreWebView2Environment.CreateAsync(
+        // WinRT 投影没有 CreateAsync(userDataFolder) 重载；自定义用户数据目录用 CreateWithOptionsAsync
+        var env = await CoreWebView2Environment.CreateWithOptionsAsync(
             null,
-            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Data"));
+            Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "WebView2Data"),
+            null);
 
         await WebView.EnsureCoreWebView2Async(env);
+
+        // 启用非客户区支持：前端工具栏的 -webkit-app-region: drag 才会生效（窗口拖动）
+        try { WebView.CoreWebView2.Settings.IsNonClientRegionSupportEnabled = true; } catch { }
+
+        // 前端 <a target="_blank"> 交给系统默认浏览器打开（否则在 WebView 内无反应）
+        WebView.CoreWebView2.NewWindowRequested += (_, e) =>
+        {
+            e.Handled = true;
+            try { Process.Start(new ProcessStartInfo(e.Uri) { UseShellExecute = true }); } catch { }
+        };
 
         // Handle messages from JS
         WebView.WebMessageReceived += OnWebMessageReceived;
 
         // Subscribe to PLC events
-        _plc.Connected += () => Dispatcher.Invoke(() => OnPlcConnected());
-        _plc.Disconnected += msg => Dispatcher.Invoke(() => OnPlcDisconnected(msg));
-        _plc.ConnectionError += err => Dispatcher.Invoke(() => OnPlcError(err));
-        _plc.PlcInfoReceived += info => Dispatcher.Invoke(() => OnPlcInfo(info));
-        _plc.DataUpdated += results => Dispatcher.Invoke(() => OnDataUpdated(results));
-        _plc.ScanTime += ms => Dispatcher.Invoke(() => OnScanTime(ms));
+        _plc.Connected += () => DispatcherQueue.TryEnqueue(OnPlcConnected);
+        _plc.Disconnected += msg => DispatcherQueue.TryEnqueue(() => OnPlcDisconnected(msg));
+        _plc.ConnectionError += err => DispatcherQueue.TryEnqueue(() => OnPlcError(err));
+        _plc.PlcInfoReceived += info => DispatcherQueue.TryEnqueue(() => OnPlcInfo(info));
+        _plc.DataUpdated += results => DispatcherQueue.TryEnqueue(() => OnDataUpdated(results));
+        _plc.ScanTime += ms => DispatcherQueue.TryEnqueue(() => OnScanTime(ms));
 
         // Navigate to the local HTML file and wait for it to finish loading
         // so that app.js (which registers the 'message' listener) is ready.
         var htmlPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "wwwroot", "index.html");
         var navigationDone = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-        EventHandler<CoreWebView2NavigationCompletedEventArgs> onNav = (_, __) =>
+        TypedEventHandler<CoreWebView2, CoreWebView2NavigationCompletedEventArgs> onNav = (_, __) =>
             navigationDone.TrySetResult(true);
         WebView.CoreWebView2.NavigationCompleted += onNav;
         WebView.CoreWebView2.Navigate(new Uri(htmlPath).AbsoluteUri);
@@ -129,19 +228,19 @@ public partial class MainWindow : Window
 
     private void OnPlcConnected()
     {
-        SendToJs(new { type = "connectionChanged", connected = true, text = "Connected", connecting = false });
+        SendToJs(new { type = "connectionChanged", connected = true, text = "已连接", connecting = false });
     }
 
     private void OnPlcDisconnected(string msg)
     {
-        SendToJs(new { type = "connectionChanged", connected = false, text = "Disconnected", connecting = false });
+        SendToJs(new { type = "connectionChanged", connected = false, text = "未连接", connecting = false });
     }
 
     private void OnPlcError(string error)
     {
         // 单次尝试失败：提示一次，状态回到未连接，由用户手动重新点击"连接"
-        SendToJs(new { type = "connectionChanged", connected = false, text = $"Connection failed: {error}", connecting = false });
-        SendToJs(new { type = "error", text = $"Connection failed: {error}" });
+        SendToJs(new { type = "connectionChanged", connected = false, text = $"连接失败：{error}", connecting = false });
+        SendToJs(new { type = "error", text = $"连接失败：{error}" });
     }
 
     private void OnPlcInfo(PlcInfo info)
@@ -227,6 +326,9 @@ public partial class MainWindow : Window
                 case "toggleScan":
                     HandleToggleScan(msg);
                     break;
+                case "setScanInterval":
+                    HandleSetScanInterval(msg);
+                    break;
                 case "refreshNow":
                     _plc.RefreshNow();
                     break;
@@ -261,7 +363,7 @@ public partial class MainWindow : Window
         _plc.SetConnection(ip, rack, slot, cpu);
         _plc.ScanInterval = scanInterval;
         _plc.SetTags([.. _tags]);
-        SendToJs(new { type = "connectionChanged", connected = false, text = "Connecting...", connecting = true });
+        SendToJs(new { type = "connectionChanged", connected = false, text = "连接中…", connecting = true });
         await _plc.ConnectAsync();
     }
 
@@ -274,7 +376,7 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            SendToJs(new { type = "error", text = $"保存画面失败: {ex.Message}" });
+            SendToJs(new { type = "error", text = $"保存画面失败：{ex.Message}" });
         }
     }
 
@@ -282,9 +384,9 @@ public partial class MainWindow : Window
     {
         var theme = msg.TryGetProperty("theme", out var t) ? t.GetString() : "light";
         bool dark = theme == "dark";
-        Background = dark
-            ? new SolidColorBrush(Color.FromRgb(0x0d, 0x11, 0x17))
-            : new SolidColorBrush(Color.FromRgb(0xf8, 0xf9, 0xfb));
+        RootGrid.Background = new SolidColorBrush(dark
+            ? Microsoft.UI.ColorHelper.FromArgb(255, 0x0d, 0x11, 0x17)
+            : Microsoft.UI.ColorHelper.FromArgb(255, 0xf8, 0xf9, 0xfb));
         SetTitlebarTheme(dark);
     }
 
@@ -335,30 +437,71 @@ public partial class MainWindow : Window
 
         var tag = _tags[index];
         var valueProp = msg.GetProperty("value");
-
-        object? value = tag.DataType switch
+        if (valueProp.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
         {
-            TagDataType.Bool => valueProp.GetBoolean(),
-            TagDataType.Byte => (byte)valueProp.GetInt32(),
-            TagDataType.Word => (ushort)valueProp.GetInt32(),
-            TagDataType.DWord => (uint)valueProp.GetInt32(),
-            TagDataType.Int => (short)valueProp.GetInt32(),
-            TagDataType.DInt => valueProp.GetInt32(),
-            TagDataType.Real => (float)valueProp.GetDouble(),
-            _ => valueProp.GetInt32()
-        };
-
-        if (value == null) return;
-
-        var (success, message) = _plc.WriteTag(tag, value);
-        if (!success)
-        {
-            SendToJs(new { type = "error", text = $"{tag.Name}: {message}" });
+            SendToJs(new { type = "error", text = $"{tag.Name}: 值无效" });
+            return;
         }
-        else
+
+        object value;
+        try
         {
-            SendToJs(new { type = "toast", text = $"{tag.Name}: write success", kind = "success" });
+            value = tag.DataType switch
+            {
+                TagDataType.Bool  => valueProp.ValueKind is JsonValueKind.True or JsonValueKind.False
+                                        ? valueProp.GetBoolean()
+                                        : valueProp.GetDouble() != 0,
+                // 用 long/double 中转，避免 DWord(>2^31) / Word 等无符号值在 GetInt32 上溢出
+                TagDataType.Byte  => (byte)(ReadAsLong(valueProp) & 0xFF),
+                TagDataType.Word  => (ushort)(ReadAsLong(valueProp) & 0xFFFF),
+                TagDataType.DWord => (uint)(ReadAsLong(valueProp) & 0xFFFFFFFF),
+                TagDataType.Int   => (short)(ReadAsLong(valueProp) & 0xFFFF),
+                TagDataType.DInt  => (int)(ReadAsLong(valueProp) & 0xFFFFFFFF),
+                TagDataType.Real  => (float)valueProp.GetDouble(),
+                _                 => (int)ReadAsLong(valueProp)
+            };
         }
+        catch (Exception ex)
+        {
+            SendToJs(new { type = "error", text = $"{tag.Name}: 值无法转换（{ex.Message}）" });
+            return;
+        }
+
+        // 写入移到后台线程执行（WriteTag 现在内部持 _commLock），
+        // 避免阻塞 UI 线程 / 与扫描循环并发读写同一个 S7 连接。
+        _ = Task.Run(() =>
+        {
+            var (success, message) = _plc.WriteTag(tag, value);
+            DispatcherQueue.TryEnqueue(() =>
+            {
+                if (!success)
+                {
+                    SendToJs(new { type = "error", text = $"{tag.Name}: {message}" });
+                }
+                else
+                {
+                    SendToJs(new { type = "toast", text = $"{tag.Name}: 写入成功", kind = "success" });
+                }
+            });
+        });
+    }
+
+    /// <summary>JSON 数值读成 long（浮点中转，兼容 DWord 等无符号大值）</summary>
+    private static long ReadAsLong(JsonElement el)
+    {
+        if (el.ValueKind == JsonValueKind.Number) return (long)el.GetDouble();
+        if (el.ValueKind == JsonValueKind.String && long.TryParse(el.GetString(), out var v)) return v;
+        throw new FormatException($"无法解析数值: {el}");
+    }
+
+    /// <summary>运行中修改扫描周期，立即生效（无需重连）</summary>
+    private void HandleSetScanInterval(JsonElement msg)
+    {
+        if (!msg.TryGetProperty("ms", out var msProp) || msProp.ValueKind != JsonValueKind.Number) return;
+        var ms = msProp.GetInt32();
+        if (ms < 50) ms = 50;
+        if (ms > 10000) ms = 10000;
+        _plc.ScanInterval = ms;
     }
 
     private void HandleSaveConfig()
@@ -366,36 +509,35 @@ public partial class MainWindow : Window
         try
         {
             _configService.Save([.. _tags]);
-            SendToJs(new { type = "toast", text = "Configuration saved", kind = "success" });
+            SendToJs(new { type = "toast", text = "标签配置已保存", kind = "success" });
         }
         catch (Exception ex)
         {
-            SendToJs(new { type = "error", text = $"Save failed: {ex.Message}" });
+            SendToJs(new { type = "error", text = $"保存失败：{ex.Message}" });
         }
     }
 
     private async Task HandleLoadConfig()
     {
-        var dialog = new Microsoft.Win32.OpenFileDialog
-        {
-            Filter = "JSON files (*.json)|*.json|All files (*.*)|*.*"
-        };
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add(".json");
 
-        if (dialog.ShowDialog() == true)
+        var file = await picker.PickSingleFileAsync();
+        if (file == null) return;
+
+        try
         {
-            try
-            {
-                var tags = _configService.Load(dialog.FileName);
-                _tags.Clear();
-                _tags.AddRange(tags);
-                _plc.SetTags([.. _tags]);
-                await PushTagsToJs();
-                SendToJs(new { type = "toast", text = $"Configuration loaded ({_tags.Count} tags)", kind = "success" });
-            }
-            catch (Exception ex)
-            {
-                SendToJs(new { type = "error", text = $"Load failed: {ex.Message}" });
-            }
+            var tags = _configService.Load(file.Path);
+            _tags.Clear();
+            _tags.AddRange(tags);
+            _plc.SetTags([.. _tags]);
+            await PushTagsToJs();
+            SendToJs(new { type = "toast", text = $"已加载配置（{_tags.Count} 个标签）", kind = "success" });
+        }
+        catch (Exception ex)
+        {
+            SendToJs(new { type = "error", text = $"加载失败：{ex.Message}" });
         }
     }
 
@@ -407,11 +549,11 @@ public partial class MainWindow : Window
         try
         {
             _configService.Save([.. _tags], path);
-            SendToJs(new { type = "toast", text = $"Saved to: {path}", kind = "success" });
+            SendToJs(new { type = "toast", text = $"已保存到：{path}", kind = "success" });
         }
         catch (Exception ex)
         {
-            SendToJs(new { type = "error", text = $"Save failed: {ex.Message}" });
+            SendToJs(new { type = "error", text = $"保存失败：{ex.Message}" });
         }
     }
 
@@ -427,7 +569,7 @@ public partial class MainWindow : Window
 
     // ── Helper: Parse TagConfig from JSON ───────────────────
 
-    private static TagConfig? ParseTagFromJson(JsonElement prop)
+    private TagConfig? ParseTagFromJson(JsonElement prop)
     {
         var name = prop.GetProperty("name").GetString();
         var address = prop.GetProperty("address").GetString()?.ToUpper();
@@ -450,7 +592,16 @@ public partial class MainWindow : Window
             ScanEnabled = scanEnabled
         };
 
-        AddressParser.ParseToTag(address, tag);
+        // 地址只用于确定区域 / 偏移 / 位号；数据类型以显式选择为准
+        // （地址后缀推导出的类型仅作为弹窗里的默认建议，之前在这里被覆盖过，
+        //   导致 DB1.DBW2 选 Int、DB1.DBD4 选 Real 保存后被改回 Word/DWord）
+        if (!AddressParser.ParseToTag(address, tag))
+        {
+            SendToJs(new { type = "error", text = $"地址无法解析：{address}" });
+            return null;
+        }
+
+        tag.DataType = dataType;
         return tag;
     }
 
@@ -494,7 +645,4 @@ public partial class MainWindow : Window
         }
         catch { }
     }
-
-    // ── Window Events ───────────────────────────────────────
-    // 原生标题栏的 X 按钮 → 正常退出应用
 }

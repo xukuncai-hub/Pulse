@@ -3,30 +3,30 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>S7 SCADA</title>
+    <title>Pulse S7 监控台</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
     <!-- Toolbar -->
     <div class="toolbar" id="toolbar">
-        <button class="tb-btn tb-btn-panel" id="btnSidebar" title="Toggle Sidebar (Ctrl+B)">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-panel" id="btnSidebar" title="折叠 / 展开侧边栏（Ctrl+B）" aria-label="折叠或展开侧边栏" aria-expanded="true">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                 <line x1="9" y1="3" x2="9" y2="21"/>
             </svg>
-            Sidebar
+            侧边栏
         </button>
         <div class="tb-sep"></div>
-        <button class="tb-btn tb-btn-connect" id="btnConnectToolbar" onclick="connectPlc()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-connect" id="btnConnectToolbar" onclick="connectPlc()" title="连接 PLC（F5）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/>
                 <polyline points="16 6 12 2 8 6"/>
                 <line x1="12" y1="2" x2="12" y2="15"/>
             </svg>
-            Connect
+            <span class="btn-label">连接</span>
         </button>
-        <button class="tb-btn tb-btn-disconnect" id="btnDisconnectToolbar" onclick="disconnectPlc()" style="display:none">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-disconnect" id="btnDisconnectToolbar" onclick="disconnectPlc()" title="断开连接（F6）" style="display:none">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <line x1="1" y1="1" x2="23" y2="23"/>
                 <path d="M16.72 11.06A10.94 10.94 0 0119 12.55"/>
                 <path d="M5 12.55a10.94 10.94 0 015.17-2.39"/>
@@ -35,36 +35,35 @@
                 <path d="M8.53 16.11a6 6 0 016.95 0"/>
                 <line x1="12" y1="20" x2="12.01" y2="20"/>
             </svg>
-            Disconnect
+            断开
         </button>
         <div class="tb-sep"></div>
-        <button class="tb-btn tb-btn-add" onclick="showAddTagModal()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-add" onclick="showAddTagModal()" title="添加标签（Ctrl+N）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <line x1="12" y1="5" x2="12" y2="19"/>
                 <line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            Add Tag
+            添加标签
         </button>
-        <div class="tb-sep"></div>
-        <button class="tb-btn tb-btn-save" onclick="saveConfig()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-save" onclick="saveConfig()" title="保存标签配置（Ctrl+S）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M19 21H5a2 2 0 01-2-2V5a2 2 0 012-2h11l5 5v11a2 2 0 01-2 2z"/>
                 <polyline points="17 21 17 13 7 13 7 21"/>
                 <polyline points="7 3 7 8 15 8"/>
             </svg>
-            Save
+            保存
         </button>
         <div class="tb-sep"></div>
-        <button class="tb-btn view-btn active" id="btnViewTable" onclick="switchView('table')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn view-btn active" id="btnViewTable" onclick="switchView('table')" title="标签表视图">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                 <line x1="3" y1="9" x2="21" y2="9"/>
                 <line x1="9" y1="21" x2="9" y2="9"/>
             </svg>
             标签表
         </button>
-        <button class="tb-btn view-btn" id="btnViewScreens" onclick="switchView('screens')">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn view-btn" id="btnViewScreens" onclick="switchView('screens')" title="画面编辑器">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <rect x="3" y="3" width="7" height="7" rx="1"/>
                 <rect x="14" y="3" width="7" height="7" rx="1"/>
                 <rect x="3" y="14" width="7" height="7" rx="1"/>
@@ -73,8 +72,8 @@
             画面
         </button>
         <div class="tb-spacer"></div>
-        <button class="tb-btn tb-btn-theme" id="btnTheme" title="Toggle Theme">
-            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="tb-btn tb-btn-theme" id="btnTheme" title="切换明 / 暗主题" aria-label="切换明暗主题">
+            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <circle cx="12" cy="12" r="5"/>
                 <line x1="12" y1="1" x2="12" y2="3"/>
                 <line x1="12" y1="21" x2="12" y2="23"/>
@@ -85,14 +84,16 @@
                 <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
                 <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
             </svg>
-            <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+            <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none" aria-hidden="true">
                 <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
             </svg>
         </button>
-        <div class="tb-status" id="toolbarStatus">
+        <div class="tb-status" id="toolbarStatus" role="status">
             <div class="led-sm" id="toolbarStatusDot"></div>
-            <span id="toolbarStatusText">Disconnected</span>
+            <span id="toolbarStatusText">未连接</span>
         </div>
+        <!-- 最小化/最大化/关闭 使用系统原生按钮（由 WinUI 绘制在右上角），
+             工具栏右侧通过 --winctl-w 为其预留位置，避免与自绘内容重叠 -->
     </div>
 
     <!-- Main Body -->
@@ -107,18 +108,19 @@
                             <div class="led-lg" id="connLed"></div>
                             <div class="conn-meta">
                                 <div class="conn-ip" id="connIp">192.168.0.1</div>
-                                <div class="conn-status" id="connStatus">Disconnected</div>
+                                <div class="conn-status" id="connStatus">未连接</div>
                                 <div class="conn-plc-info" id="connPlcInfo"></div>
                             </div>
                         </div>
                     </div>
                     <div class="conn-form">
                         <div class="field">
-                            <label class="field-label">PLC IP Address</label>
-                            <input type="text" class="field-input mono" id="inputIp" value="192.168.0.1" placeholder="192.168.0.1">
+                            <label class="field-label" for="inputIp">PLC IP 地址</label>
+                            <input type="text" class="field-input mono" id="inputIp" value="192.168.0.1" placeholder="192.168.0.1"
+                                   spellcheck="false" autocomplete="off" inputmode="decimal">
                         </div>
                         <div class="field">
-                            <label class="field-label">CPU Type</label>
+                            <label class="field-label" for="inputCpu">CPU 型号</label>
                             <select class="field-input" id="inputCpu">
                                 <option value="S71200" selected>S7-1200</option>
                                 <option value="S71500">S7-1500</option>
@@ -128,28 +130,28 @@
                         </div>
                         <div class="field-row-3">
                             <div class="field">
-                                <label class="field-label">Rack</label>
-                                <input type="number" class="field-input" id="inputRack" value="0" min="0">
+                                <label class="field-label" for="inputRack">机架</label>
+                                <input type="number" class="field-input" id="inputRack" value="0" min="0" max="7">
                             </div>
                             <div class="field">
-                                <label class="field-label">Slot</label>
-                                <input type="number" class="field-input" id="inputSlot" value="1" min="0">
+                                <label class="field-label" for="inputSlot">插槽</label>
+                                <input type="number" class="field-input" id="inputSlot" value="1" min="0" max="31">
                             </div>
                             <div class="field">
-                                <label class="field-label">Scan (ms)</label>
-                                <input type="number" class="field-input" id="inputScan" value="100" min="50" max="10000">
+                                <label class="field-label" for="inputScan">周期 ms</label>
+                                <input type="number" class="field-input" id="inputScan" value="100" min="50" max="10000" step="50">
                             </div>
                         </div>
                         <button class="btn btn-green btn-full" id="btnConnectSidebar" onclick="connectPlc()">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <path d="M4 12v8a2 2 0 002 2h12a2 2 0 002-2v-8"/>
                                 <polyline points="16 6 12 2 8 6"/>
                                 <line x1="12" y1="2" x2="12" y2="15"/>
                             </svg>
-                            Connect PLC
+                            <span class="btn-label">连接 PLC</span>
                         </button>
                         <button class="btn btn-red btn-full" id="btnDisconnectSidebar" onclick="disconnectPlc()" style="display:none">
-                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="1" y1="1" x2="23" y2="23"/>
                                 <path d="M16.72 11.06A10.94 10.94 0 0119 12.55"/>
                                 <path d="M5 12.55a10.94 10.94 0 015.17-2.39"/>
@@ -158,20 +160,20 @@
                                 <path d="M8.53 16.11a6 6 0 016.95 0"/>
                                 <line x1="12" y1="20" x2="12.01" y2="20"/>
                             </svg>
-                            Disconnect
+                            断开连接
                         </button>
                     </div>
                     <div class="plc-details" id="plcDetail" style="display:none">
                         <div class="plc-row">
-                            <span class="plc-label">Module</span>
+                            <span class="plc-label">型号</span>
                             <span class="plc-val" id="plcModule">-</span>
                         </div>
                         <div class="plc-row">
-                            <span class="plc-label">Firmware</span>
+                            <span class="plc-label">固件</span>
                             <span class="plc-val" id="plcFirmware">-</span>
                         </div>
                         <div class="plc-row">
-                            <span class="plc-label">Serial</span>
+                            <span class="plc-label">序列号</span>
                             <span class="plc-val" id="plcSerial">-</span>
                         </div>
                     </div>
@@ -179,43 +181,44 @@
 
                 <!-- TIA Portal Info -->
                 <div class="info-card info-card-amber">
-                    <div class="info-card-head">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
                             <line x1="12" y1="9" x2="12" y2="13"/>
                             <line x1="12" y1="17" x2="12.01" y2="17"/>
                         </svg>
-                        <span>TIA Portal Settings</span>
+                        <span>TIA Portal 设置</span>
                     </div>
                     <ol class="info-list">
-                        <li>CPU Properties &rarr; Protection &amp; Security &rarr; Allow PUT/GET</li>
-                        <li>DB Properties &rarr; Uncheck "Optimized block access"</li>
-                        <li>Confirm CPU is in RUN mode</li>
+                        <li>CPU 属性 &rarr; 防护与安全 &rarr; 勾选"允许 PUT/GET 通信"</li>
+                        <li>DB 属性 &rarr; 取消勾选"优化的块访问"并重新编译</li>
+                        <li>确认 CPU 处于 RUN 模式</li>
                     </ol>
                 </div>
 
                 <!-- Address Format -->
                 <div class="info-card info-card-blue">
-                    <div class="info-card-head">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
                             <line x1="3" y1="9" x2="21" y2="9"/>
                             <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
-                        <span>Address Format</span>
+                        <span>地址格式</span>
                     </div>
-                    <div class="info-mono">DB1.DBX0.0   Bool bit
-DB1.DBW2     Word
-DB1.DBD4     DWord
-M0.0  M Bool   I0.0  Input
-Q0.0  Output  MW2   M Word
-T0    Timer   C0    Counter</div>
+                    <div class="info-mono">DB1.DBX0.0   位 / Bool
+DB1.DBB0     Byte
+DB1.DBW2     Word / Int
+DB1.DBD4     DWord / DInt / Real
+M0.0  M 位    I0.0  输入
+Q0.0  输出    MW2   M 字
+T0    定时器  C0    计数器</div>
                 </div>
 
                 <!-- Shortcuts -->
                 <div class="info-card">
-                    <div class="info-card-head">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <rect x="2" y="4" width="20" height="16" rx="2" ry="2"/>
                             <line x1="6" y1="8" x2="6.01" y2="8"/>
                             <line x1="10" y1="8" x2="10.01" y2="8"/>
@@ -225,12 +228,13 @@ T0    Timer   C0    Counter</div>
                             <line x1="6" y1="16" x2="6.01" y2="16"/>
                             <line x1="18" y1="16" x2="18.01" y2="16"/>
                         </svg>
-                        <span>Keyboard Shortcuts</span>
+                        <span>快捷键</span>
                     </div>
-                    <div class="info-mono">F5 Connect   F6 Disconnect
-Ctrl+N Add Tag   Ctrl+S Save
-Double-click to write value
-Right-click for context menu</div>
+                    <div class="info-mono">F5 连接      F6 断开
+Ctrl+N 添加标签
+Ctrl+S 保存配置
+Ctrl+B 折叠侧边栏
+双击写值 · 右键菜单</div>
                 </div>
             </div>
         </aside>
@@ -243,7 +247,7 @@ Right-click for context menu</div>
             <section class="section-dashboard" id="dashboardSection" style="display:none">
                 <div class="section-head">
                     <div class="section-title-row">
-                        <h2 class="section-title">Live Values</h2>
+                        <h2 class="section-title">实时数值</h2>
                         <span class="count-pill" id="dashboardCount">0</span>
                     </div>
                 </div>
@@ -254,44 +258,53 @@ Right-click for context menu</div>
             <section class="section-table">
                 <div class="section-head">
                     <div class="section-title-row">
-                        <h2 class="section-title">Tag Data</h2>
+                        <h2 class="section-title">标签数据</h2>
                         <span class="count-pill" id="tagCount">0</span>
                     </div>
                     <div class="section-actions">
                         <div class="filter-bar">
                             <input type="text" class="field-input filter-search" id="filterSearch"
-                                   placeholder="Search name / address..." spellcheck="false">
-                            <select class="field-input filter-group" id="filterGroup" title="Filter by group"></select>
+                                   placeholder="搜索名称 / 地址…" spellcheck="false" autocomplete="off" aria-label="搜索标签">
+                            <select class="field-input filter-group" id="filterGroup" title="按分组筛选" aria-label="按分组筛选"></select>
                         </div>
-                        <button class="btn btn-ghost btn-sm" onclick="refreshNow()">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <button class="btn btn-ghost btn-sm" onclick="refreshNow()" title="立即读取一次全部标签">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <polyline points="23 4 23 10 17 10"/>
                                 <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
                             </svg>
-                            Refresh
+                            刷新
                         </button>
                         <button class="btn btn-blue btn-sm" onclick="showAddTagModal()">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="12" y1="5" x2="12" y2="19"/>
                                 <line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            Add Tag
+                            添加标签
                         </button>
                     </div>
                 </div>
 
                 <!-- Empty State -->
                 <div class="empty-state" id="emptyState">
-                    <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+                    <svg class="empty-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true">
                         <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/>
                         <polyline points="14 2 14 8 20 8"/>
                         <line x1="12" y1="18" x2="12" y2="12"/>
                         <line x1="9" y1="15" x2="15" y2="15"/>
                     </svg>
-                    <div class="empty-title">No Tags Configured</div>
+                    <div class="empty-title">还没有配置标签</div>
                     <div class="empty-desc">
-                        Click <strong>+ Add Tag</strong> to start monitoring PLC signals.<br>
-                        Supports DB, M, I, Q, T, and C address areas.
+                        添加标签后即可实时监控 PLC 信号，支持 <strong>DB / M / I / Q / T / C</strong> 地址区。<br>
+                        也可以按 <strong>Ctrl+N</strong> 快速添加。
+                    </div>
+                    <div class="empty-actions">
+                        <button class="btn btn-blue" onclick="showAddTagModal()">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <line x1="12" y1="5" x2="12" y2="19"/>
+                                <line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            添加标签
+                        </button>
                     </div>
                 </div>
 
@@ -300,13 +313,13 @@ Right-click for context menu</div>
                     <table class="data-table">
                         <thead>
                             <tr>
-                                <th style="width:22%">Name</th>
-                                <th style="width:15%">Address</th>
-                                <th style="width:12%">Group</th>
-                                <th style="width:9%">Type</th>
-                                <th style="width:auto">Value</th>
-                                <th style="width:9%">Quality</th>
-                                <th style="width:14%">Timestamp</th>
+                                <th style="width:20%">名称</th>
+                                <th style="width:14%">地址</th>
+                                <th style="width:15%">分组</th>
+                                <th style="width:8%">类型</th>
+                                <th style="width:auto">数值</th>
+                                <th style="width:9%">质量</th>
+                                <th style="width:13%">更新时间</th>
                             </tr>
                         </thead>
                         <tbody id="tagTableBody"></tbody>
@@ -320,38 +333,39 @@ Right-click for context menu</div>
                 <div class="screens-head">
                     <div class="screen-tabs" id="screenTabs"></div>
                     <div class="screens-head-actions">
-                        <button class="btn btn-blue btn-sm" onclick="addScreen()">
-                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <button class="btn btn-blue btn-sm" onclick="addScreen()" title="新增一个画面">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
-                            + 画面
+                            新建画面
                         </button>
-                        <button class="btn btn-ghost btn-sm" onclick="renameCurrentScreen()">重命名</button>
-                        <button class="btn btn-red btn-sm" onclick="deleteCurrentScreen()">删除</button>
+                        <button class="btn btn-ghost btn-sm" onclick="renameCurrentScreen()" title="重命名当前画面">重命名</button>
+                        <button class="btn btn-red btn-sm" onclick="deleteCurrentScreen()" title="删除当前画面">删除</button>
                     </div>
                 </div>
 
                 <div class="screen-toolbar">
                     <span class="screen-toolbar-label">添加组件</span>
-                    <button class="btn btn-blue btn-sm" onclick="addWidget('value')">数值</button>
-                    <button class="btn btn-green btn-sm" onclick="addWidget('lamp')">指示灯</button>
-                    <button class="btn btn-ghost btn-sm" onclick="addWidget('text')">文本</button>
+                    <button class="btn btn-blue btn-sm" onclick="addWidget('value')" title="数值显示组件">数值</button>
+                    <button class="btn btn-green btn-sm" onclick="addWidget('lamp')" title="指示灯组件">指示灯</button>
+                    <button class="btn btn-ghost btn-sm" onclick="addWidget('text')" title="文本组件">文本</button>
                     <div class="tb-spacer"></div>
+                    <span class="screen-toolbar-label">拖拽摆放 · 拖动右下角缩放</span>
                     <button class="btn btn-red btn-sm" id="btnDeleteWidget" onclick="deleteSelectedWidget()" disabled>删除选中</button>
                 </div>
 
                 <div class="widget-props" id="widgetProps" style="display:none">
                     <span class="widget-props-title">组件属性</span>
                     <div class="field prop-field">
-                        <label class="field-label">绑定标签</label>
+                        <label class="field-label" for="propTag">绑定标签</label>
                         <select class="field-input" id="propTag"></select>
                     </div>
                     <div class="field prop-field">
-                        <label class="field-label">文字</label>
-                        <input type="text" class="field-input" id="propLabel" placeholder="组件文字">
+                        <label class="field-label" for="propLabel">显示文字</label>
+                        <input type="text" class="field-input" id="propLabel" placeholder="留空则显示标签名" spellcheck="false" autocomplete="off">
                     </div>
                     <div class="field prop-field">
-                        <label class="field-label">字号</label>
+                        <label class="field-label" for="propFont">字号</label>
                         <input type="number" class="field-input" id="propFont" value="14" min="9" max="64">
                     </div>
                 </div>
@@ -360,7 +374,7 @@ Right-click for context menu</div>
                     <div class="canvas" id="screenCanvas"></div>
                     <div class="screen-empty" id="screenEmpty" style="display:none">
                         <div class="empty-title">还没有画面</div>
-                        <div class="empty-desc">点击右上角 <strong>+ 画面</strong> 添加一个上位机画面<br>然后在画布上添加数值 / 指示灯 / 文本组件</div>
+                        <div class="empty-desc">点击右上角 <strong>新建画面</strong> 创建一个上位机画面<br>然后在画布上添加数值 / 指示灯 / 文本组件</div>
                     </div>
                 </div>
             </div><!-- /#screensView -->
@@ -371,7 +385,7 @@ Right-click for context menu</div>
     <div class="statusbar">
         <div class="sb-left">
             <div class="led-sm" id="statusDot"></div>
-            <span id="statusText">Disconnected</span>
+            <span id="statusText">未连接</span>
         </div>
         <div class="sb-center">
             <span id="statusPlcInfo"></span>
@@ -381,63 +395,66 @@ Right-click for context menu</div>
             <span class="sb-sep">|</span>
             <span class="sb-item" id="statusScanTime">--</span>
             <span class="sb-sep">|</span>
-            <span class="sb-item" id="statusTagCount">Tags: 0</span>
+            <span class="sb-item" id="statusTagCount">标签: 0</span>
         </div>
     </div>
 
     <!-- Context Menu -->
     <div class="ctx-menu" id="contextMenu">
         <div class="ctx-item" onclick="contextWriteValue()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
             </svg>
-            <span>Write Value...</span>
-            <span class="ctx-key">Dbl-Click</span>
+            <span>写入数值…</span>
+            <span class="ctx-key">双击</span>
         </div>
         <div class="ctx-item" id="ctxToggleScan" onclick="contextToggleScan()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polyline points="23 4 23 10 17 10"/>
                 <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/>
             </svg>
-            <span id="ctxToggleScanText">Disable Scan</span>
+            <span id="ctxToggleScanText">停用扫描</span>
         </div>
         <div class="ctx-sep"></div>
         <div class="ctx-item" onclick="contextEditTag()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/>
                 <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/>
             </svg>
-            <span>Edit Tag...</span>
+            <span>编辑标签…</span>
         </div>
         <div class="ctx-item ctx-danger" onclick="contextDeleteTag()">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <polyline points="3 6 5 6 21 6"/>
                 <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
-            <span>Delete Tag</span>
+            <span>删除标签</span>
         </div>
     </div>
 
     <!-- Tag Editor Modal -->
     <div class="modal-overlay" id="tagEditorModal">
-        <div class="modal">
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tagEditorTitle">
             <div class="modal-head">
-                <h3 class="modal-title" id="tagEditorTitle">Add Tag</h3>
-                <button class="modal-x" onclick="closeTagEditor()">&times;</button>
+                <h3 class="modal-title" id="tagEditorTitle">添加标签</h3>
+                <button class="modal-x" onclick="closeTagEditor()" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="field">
-                    <label class="field-label req">Tag Name</label>
-                    <input type="text" class="field-input" id="editorName" placeholder="e.g. Motor Speed">
+                    <label class="field-label req" for="editorName">标签名称</label>
+                    <input type="text" class="field-input" id="editorName" placeholder="例如：电机转速" spellcheck="false" autocomplete="off">
+                    <div class="field-error" id="editorNameError"></div>
                 </div>
                 <div class="field">
-                    <label class="field-label req">Address</label>
-                    <input type="text" class="field-input mono" id="editorAddress" placeholder="e.g. DB1.DBW2" oninput="onAddressChanged()">
-                    <div class="field-preview" id="editorPreview">Enter an address to auto-parse...</div>
+                    <label class="field-label req" for="editorAddress">地址</label>
+                    <input type="text" class="field-input mono" id="editorAddress" placeholder="例如：DB1.DBW2" spellcheck="false"
+                           autocomplete="off" oninput="onAddressChanged()">
+                    <div class="field-preview" id="editorPreview">输入地址后自动解析…</div>
+                    <div class="field-error" id="editorAddressError"></div>
                 </div>
                 <div class="field">
-                    <label class="field-label">Data Type</label>
+                    <label class="field-label" for="editorDataType">数据类型</label>
                     <select class="field-input" id="editorDataType">
                         <option value="Bool">Bool</option>
                         <option value="Byte">Byte</option>
@@ -450,8 +467,8 @@ Right-click for context menu</div>
                 </div>
                 <div class="field-row-2">
                     <div class="field">
-                        <label class="field-label">Group</label>
-                        <input type="text" class="field-input" id="editorGroup" list="groupList" value="Default">
+                        <label class="field-label" for="editorGroup">分组</label>
+                        <input type="text" class="field-input" id="editorGroup" list="groupList" value="Default" spellcheck="false" autocomplete="off">
                         <datalist id="groupList">
                             <option value="Default">
                             <option value="Digital Inputs">
@@ -464,31 +481,31 @@ Right-click for context menu</div>
                         </datalist>
                     </div>
                     <div class="field">
-                        <label class="field-label">Comment</label>
-                        <input type="text" class="field-input" id="editorComment" placeholder="Optional description">
+                        <label class="field-label" for="editorComment">备注</label>
+                        <input type="text" class="field-input" id="editorComment" placeholder="可选说明" spellcheck="false" autocomplete="off">
                     </div>
                 </div>
                 <div class="field">
                     <label class="check-label">
                         <input type="checkbox" id="editorScanEnabled" checked>
                         <span class="check-box"></span>
-                        Enable scanning
+                        启用扫描
                     </label>
                 </div>
             </div>
             <div class="modal-foot">
-                <button class="btn btn-ghost" onclick="closeTagEditor()">Cancel</button>
-                <button class="btn btn-blue" onclick="confirmTagEditor()">Confirm</button>
+                <button class="btn btn-ghost" onclick="closeTagEditor()">取消</button>
+                <button class="btn btn-blue" onclick="confirmTagEditor()">确定</button>
             </div>
         </div>
     </div>
 
     <!-- Write Value Modal -->
     <div class="modal-overlay" id="writeValueModal">
-        <div class="modal modal-sm">
+        <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="writeValueTitle">
             <div class="modal-head">
-                <h3 class="modal-title">Write Value</h3>
-                <button class="modal-x" onclick="closeWriteValue()">&times;</button>
+                <h3 class="modal-title" id="writeValueTitle">写入数值</h3>
+                <button class="modal-x" onclick="closeWriteValue()" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body">
                 <div class="write-info">
@@ -497,35 +514,57 @@ Right-click for context menu</div>
                     <div class="write-current" id="writeTagCurrent"></div>
                 </div>
                 <div class="field">
-                    <label class="field-label">New Value</label>
-                    <input type="text" class="field-input mono" id="writeValueInput" placeholder="Enter value (prefix 0x for hex)">
+                    <label class="field-label" for="writeValueInput">新值</label>
+                    <input type="text" class="field-input mono" id="writeValueInput" placeholder="输入数值（0x 前缀表示十六进制）"
+                           spellcheck="false" autocomplete="off">
+                    <div class="field-error" id="writeValueError"></div>
                 </div>
             </div>
             <div class="modal-foot">
-                <button class="btn btn-ghost" onclick="closeWriteValue()">Cancel</button>
-                <button class="btn btn-blue" onclick="confirmWriteValue()">Write</button>
+                <button class="btn btn-ghost" onclick="closeWriteValue()">取消</button>
+                <button class="btn btn-blue" onclick="confirmWriteValue()">写入</button>
             </div>
         </div>
     </div>
 
     <!-- About Modal -->
     <div class="modal-overlay" id="aboutModal">
-        <div class="modal modal-sm">
+        <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
             <div class="modal-head">
-                <h3 class="modal-title">关于 S7 SCADA</h3>
-                <button class="modal-x" onclick="closeAbout()">&times;</button>
+                <h3 class="modal-title" id="aboutTitle">关于 Pulse S7 监控台</h3>
+                <button class="modal-x" onclick="closeAbout()" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body about-body">
-                <div class="about-logo">S7</div>
-                <div class="about-name">S7 SCADA</div>
-                <div class="about-ver">版本 v1.0</div>
-                <div class="about-desc">基于 C# WPF + WebView2 的西门子 S7 上位机监控软件</div>
+                <div class="about-logo" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" width="64" height="64">
+                        <defs>
+                            <linearGradient id="aboutLogoGrad" x1="0" y1="0" x2="1" y2="1">
+                                <stop offset="0" stop-color="#4A8BF5"/>
+                                <stop offset="1" stop-color="#1D4ED8"/>
+                            </linearGradient>
+                        </defs>
+                        <rect x="0.45" y="0.45" width="23.1" height="23.1" rx="5.2" fill="url(#aboutLogoGrad)"/>
+                        <g fill="#ffffff" opacity="0.16">
+                            <circle cx="7.2" cy="7.2" r="0.55"/><circle cx="12" cy="7.2" r="0.55"/><circle cx="16.8" cy="7.2" r="0.55"/>
+                            <circle cx="7.2" cy="12" r="0.55"/><circle cx="12" cy="12" r="0.55"/><circle cx="16.8" cy="12" r="0.55"/>
+                            <circle cx="7.2" cy="16.8" r="0.55"/><circle cx="12" cy="16.8" r="0.55"/><circle cx="16.8" cy="16.8" r="0.55"/>
+                        </g>
+                        <path d="M3.1 14.3 H7.6 L9.7 7.2 L12 19.6 L14.2 10.7 L16.2 14.3 H20.9"
+                              fill="none" stroke="#ffffff" stroke-width="2.1"
+                              stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="19.1" cy="7.1" r="2" fill="#34D17A"/>
+                    </svg>
+                </div>
+                <div class="about-name">Pulse S7 监控台</div>
+                <div class="about-ver">Pulse · 版本 v1.1</div>
+                <div class="about-desc">西门子 S7 系列上位机监控软件<br>现场脉搏，实时可见</div>
                 <div class="about-rows">
+                    <div class="about-row"><span class="about-k">名称</span><span class="about-v">Pulse（脉动）· S7 监控台</span></div>
                     <div class="about-row"><span class="about-k">作者</span><span class="about-v">xukuncai</span></div>
                     <div class="about-row"><span class="about-k">邮箱</span><span class="about-v">xukuncai0001@gmail.com</span></div>
-                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WPF / WebView2 / S7netplus</span></div>
+                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WinUI 3 / WebView2 / S7netplus</span></div>
                     <div class="about-row"><span class="about-k">源码</span>
-                        <a class="about-link" href="https://github.com/xukuncai-hub/s7-scada" target="_blank">github.com/xukuncai-hub/s7-scada</a>
+                        <a class="about-link" href="https://github.com/xukuncai-hub/s7-scada" target="_blank" rel="noopener noreferrer">github.com/xukuncai-hub/s7-scada</a>
                     </div>
                 </div>
                 <div class="about-license">仅供学习与内部使用</div>

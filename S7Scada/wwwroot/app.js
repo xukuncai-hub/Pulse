@@ -1,5 +1,5 @@
 /* ================================================================
-   S7 SCADA — JavaScript Bridge & UI Controller
+   Pulse S7 监控台 — JavaScript Bridge & UI Controller
    ================================================================ */
 
 // ── State ─────────────────────────────────────────────────────
@@ -10,6 +10,7 @@ var state = {
     scanTime: 0,
     contextTagIndex: -1,
     editingTagIndex: -1,
+    editorTypeTouched: false, // 用户是否手动改过"数据类型"下拉
     view: 'table',
     screens: [],
     currentScreen: -1,
@@ -32,11 +33,16 @@ function applyTheme(theme) {
     } else {
         html.removeAttribute('data-theme');
     }
-    var sunIcon = document.querySelector('.theme-btn .icon-sun');
-    var moonIcon = document.querySelector('.theme-btn .icon-moon');
+    var sunIcon = document.querySelector('#btnTheme .icon-sun');
+    var moonIcon = document.querySelector('#btnTheme .icon-moon');
     if (sunIcon && moonIcon) {
         sunIcon.style.display = theme === 'dark' ? 'none' : '';
         moonIcon.style.display = theme === 'dark' ? '' : 'none';
+    }
+    // 区域 / 数据类型配色来自 CSS 变量，切主题后需要重绘列表才能取到新值
+    if (state.tags.length) {
+        renderDashboard();
+        renderTable();
     }
     // Notify the WPF window so its chrome background matches the theme
     postToCSharp({ action: 'theme', theme: theme });
@@ -54,29 +60,21 @@ function toggleTheme() {
     applyTheme(saved);
 })();
 
-// ── Area & Type Colors (read from CSS variables for theme support) ──
+// ── Area & Type Colors ────────────────────────────────────────
+// 统一从 CSS 变量读取（明/暗主题各自取值），避免深色模式下硬编码色对比度不足
 function getCssVar(name) {
     return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-var AREA_COLORS = {
-    DB: '#2563eb',
-    M:  '#16a34a',
-    I:  '#d97706',
-    Q:  '#dc2626',
-    T:  '#9333ea',
-    C:  '#9333ea'
-};
+var COLOR_FALLBACK = '#2563eb';
 
-var TYPE_COLORS = {
-    Bool: '#2563eb',
-    Byte: '#16a34a',
-    Word: '#d97706',
-    DWord:'#dc2626',
-    Int:  '#9333ea',
-    DInt: '#2563eb',
-    Real: '#d97706'
-};
+function areaColor(area) {
+    return getCssVar('--area-' + String(area || 'M').toLowerCase()) || COLOR_FALLBACK;
+}
+
+function typeColor(dataType) {
+    return getCssVar('--type-' + String(dataType || 'Bool').toLowerCase()) || COLOR_FALLBACK;
+}
 
 // ── Window Controls ───────────────────────────────────────────
 // 原生标题栏负责最小化/最大化/关闭与拖动，无需自定义处理。
@@ -136,7 +134,7 @@ window.onDataUpdated = function (results) {
 window.onScanTime = function (ms) {
     state.scanTime = ms;
     var el = document.getElementById('statusScanTime');
-    if (el) el.textContent = 'Scan: ' + ms.toFixed(1) + ' ms';
+    if (el) el.textContent = '扫描: ' + ms.toFixed(1) + ' ms';
 };
 
 window.onTagsChanged = function (tags) {
@@ -173,6 +171,7 @@ if (window.chrome && window.chrome.webview) {
             case 'scanTime':          window.onScanTime(msg.ms); break;
             case 'tagsChanged':       window.onTagsChanged(msg.tags); break;
             case 'screensChanged':    window.onScreensChanged(msg.screens); break;
+            case 'windowMetrics':     window.onWindowMetrics(msg); break;
             case 'toast':             showToast(msg.text, msg.kind || 'info'); break;
             case 'error':             showToast(msg.text, 'error'); break;
             default: break;
@@ -188,9 +187,19 @@ function connectPlc() {
     var cpu = document.getElementById('inputCpu').value;
 
     if (!ip) {
-        showToast('Please enter a PLC IP address', 'error');
+        showToast('请先填写 PLC 的 IP 地址', 'error');
+        document.getElementById('inputIp').focus();
         return;
     }
+    if (/[^0-9a-zA-Z.\-:]/.test(ip)) {
+        showToast('IP 地址格式不正确：' + ip, 'error');
+        document.getElementById('inputIp').focus();
+        return;
+    }
+
+    // 侧边栏标题同步显示实际连接的地址（之前一直写死 192.168.0.1）
+    var connIp = document.getElementById('connIp');
+    if (connIp) connIp.textContent = ip;
 
     postToCSharp({
         action: 'connect',
@@ -205,6 +214,16 @@ function connectPlc() {
 function disconnectPlc() {
     postToCSharp({ action: 'disconnect' });
 }
+
+// 宿主告知的系统窗口按钮宽度（逻辑像素 = CSS px），用于工具栏右侧预留，
+// 避免内容压到最小化/最大化/关闭按钮下面。平台值缺失时回退到 CSS 默认值。
+window.onWindowMetrics = function (m) {
+    if (!m || typeof m.rightInset !== 'number') return;
+    var inset = Math.round(m.rightInset);
+    if (inset > 0) {
+        document.documentElement.style.setProperty('--winctl-w', (inset + 6) + 'px');
+    }
+};
 
 function addTag(tag) {
     postToCSharp({ action: 'addTag', tag: tag });
@@ -250,6 +269,7 @@ function updateConnectionUI(connected, statusText, connecting) {
     var statusEl = document.getElementById('connStatus');
     var toolbarDot = document.getElementById('toolbarStatusDot');
     var toolbarText = document.getElementById('toolbarStatusText');
+    var toolbarPill = document.getElementById('toolbarStatus');
     var statusDot = document.getElementById('statusDot');
     var statusTextEl = document.getElementById('statusText');
     var btnConnToolbar = document.getElementById('btnConnectToolbar');
@@ -259,7 +279,8 @@ function updateConnectionUI(connected, statusText, connecting) {
     var plcDetail = document.getElementById('plcDetail');
 
     connecting = !!connecting;
-    var label = statusText || (connected ? 'Connected' : 'Disconnected');
+    var label = statusText || (connecting ? '连接中…' : (connected ? '已连接' : '未连接'));
+    var failed = !connected && !connecting && /失败|fail/i.test(label);
 
     // Toggle connected / connecting classes (amber pulse while attempting)
     header.classList.toggle('connected', connected);
@@ -272,14 +293,25 @@ function updateConnectionUI(connected, statusText, connecting) {
     toolbarDot.classList.toggle('connected', connected);
     toolbarDot.classList.toggle('connecting', connecting);
 
+    // 工具栏状态胶囊随状态配色
+    if (toolbarPill) {
+        toolbarPill.classList.toggle('is-connected', connected);
+        toolbarPill.classList.toggle('is-connecting', connecting);
+        toolbarPill.classList.toggle('is-failed', failed);
+    }
+
     // Status text
     statusEl.textContent = label;
     toolbarText.textContent = label;
     statusTextEl.textContent = label;
+    if (statusEl) statusEl.title = label;
 
     // Statusbar left parent
     var sbl = document.querySelector('.sb-left');
-    if (sbl) sbl.classList.toggle('connected', connected);
+    if (sbl) {
+        sbl.classList.toggle('connected', connected);
+        sbl.classList.toggle('connecting', connecting);
+    }
 
     // Button visibility + disable Connect while an attempt is in flight
     btnConnToolbar.style.display = connected ? 'none' : '';
@@ -288,6 +320,12 @@ function updateConnectionUI(connected, statusText, connecting) {
     btnConnSidebar.style.display = connected ? 'none' : '';
     btnConnSidebar.disabled = connecting;
     btnDisconnSidebar.style.display = connected ? '' : 'none';
+
+    // 连接按钮在尝试期间显示"连接中…"，给出明确的进行中反馈
+    var btnConnSidebarLabel = btnConnSidebar.querySelector('.btn-label');
+    if (btnConnSidebarLabel) btnConnSidebarLabel.textContent = connecting ? '连接中…' : '连接 PLC';
+    var btnConnToolbarLabel = btnConnToolbar.querySelector('.btn-label');
+    if (btnConnToolbarLabel) btnConnToolbarLabel.textContent = connecting ? '连接中…' : '连接';
 
     // Input disable state
     document.getElementById('inputIp').disabled = connected;
@@ -327,7 +365,7 @@ function updateTagCount() {
     var statusTagEl = document.getElementById('statusTagCount');
     if (tagCountEl) tagCountEl.textContent = String(count);
     if (dashCountEl) dashCountEl.textContent = String(count);
-    if (statusTagEl) statusTagEl.textContent = 'Tags: ' + count;
+    if (statusTagEl) statusTagEl.textContent = '标签: ' + count;
 }
 
 // ── Dashboard Cards ───────────────────────────────────────────
@@ -353,14 +391,15 @@ function renderDashboard() {
     state.dashValEls = {};
     for (var i = 0; i < state.tags.length; i++) {
         var tag = state.tags[i];
-        var areaColor = AREA_COLORS[tag.area] || AREA_COLORS.M;
-        var typeColor = TYPE_COLORS[tag.dataType] || TYPE_COLORS.Bool;
+        var aColor = areaColor(tag.area);
+        var tColor = typeColor(tag.dataType);
 
         var card = document.createElement('div');
         card.className = 'dash-card';
-        card.style.setProperty('--card-accent', areaColor);
-        card.style.setProperty('--type-bg', typeColor);
+        card.style.setProperty('--card-accent', aColor);
+        card.style.setProperty('--type-bg', tColor);
         card.dataset.index = i;
+        card.title = tag.name + ' · ' + tag.address + ' · ' + tag.dataType;
 
         card.innerHTML =
             '<div class="dash-top">' +
@@ -368,11 +407,12 @@ function renderDashboard() {
                 '<div class="dash-addr">' + esc(tag.address) + '</div>' +
             '</div>' +
             '<div class="dash-bottom">' +
-                '<div class="dash-value" id="dashVal' + i + '">' + formatValue(tag.value, tag.quality) + '</div>' +
+                '<div class="dash-value" id="dashVal' + i + '">' + esc(formatValue(tag.value, tag.quality)) + '</div>' +
                 '<div class="dash-type">' + esc(tag.dataType) + '</div>' +
             '</div>';
 
         state.dashValEls[i] = card.querySelector('.dash-value');
+        state.dashValEls[i].title = formatValueFull(tag.value, tag.quality);
 
         (function (idx) {
             card.addEventListener('dblclick', function () { handleDoubleClick(idx); });
@@ -390,17 +430,22 @@ function updateDashboardValues() {
             var newVal = formatValue(tag.value, tag.quality);
             if (el.textContent !== newVal) {
                 el.textContent = newVal;
+                el.title = formatValueFull(tag.value, tag.quality);
                 el.className = 'dash-value ' + (tag.quality === 'Good' ? '' : tag.quality === 'Bad' ? 'bad' : 'unknown');
-                var parentCard = el.closest('.dash-card');
-                if (parentCard) {
-                    parentCard.classList.add('value-updated');
-                    (function (card) {
-                        setTimeout(function () { card.classList.remove('value-updated'); }, 500);
-                    })(parentCard);
-                }
+                // 只让数值本身闪一下，整张卡片闪烁在 100ms 扫描下会非常干扰
+                flashValue(el);
             }
         }
     }
+}
+
+// 数值变化时的短暂高亮（同一元素连续变化只保留一次动画）
+function flashValue(el) {
+    el.classList.remove('value-updated');
+    void el.offsetWidth; // 强制重排，让动画可以重新触发
+    el.classList.add('value-updated');
+    if (el._flashTimer) clearTimeout(el._flashTimer);
+    el._flashTimer = setTimeout(function () { el.classList.remove('value-updated'); }, 460);
 }
 
 // ── Tag Table ─────────────────────────────────────────────────
@@ -420,8 +465,8 @@ function renderTable() {
         if (!tagMatches(tag)) continue;
         visible++;
 
-        var areaColor = AREA_COLORS[tag.area] || AREA_COLORS.M;
-        var typeColor = TYPE_COLORS[tag.dataType] || TYPE_COLORS.Bool;
+        var aColor = areaColor(tag.area);
+        var tColor = typeColor(tag.dataType);
         var qualityClass = tag.quality === 'Good' ? 'good' : tag.quality === 'Bad' ? 'bad' : 'unknown';
         var valueClass = tag.quality === 'Good' ? '' : tag.quality === 'Bad' ? 'bad' : 'unknown';
 
@@ -437,19 +482,20 @@ function renderTable() {
             '<td>' +
                 '<div class="cell-name">' +
                     '<span class="scan-dot ' + (tag.scanEnabled ? 'on' : 'off') + '"></span>' +
-                    '<span class="area-dot" style="background:' + areaColor + '"></span>' +
-                    '<span class="name-text">' + esc(tag.name) + '</span>' +
+                    '<span class="area-dot" style="background:' + aColor + '"></span>' +
+                    '<span class="name-text" title="' + esc(tag.name) + '">' + esc(tag.name) + '</span>' +
                 '</div>' +
             '</td>' +
-            '<td class="cell-address">' + esc(tag.address) + '</td>' +
+            '<td class="cell-address" title="' + esc(tag.address) + '">' + esc(tag.address) + '</td>' +
             '<td><span class="group-badge">' + esc(tag.group || 'Default') + '</span></td>' +
-            '<td><span class="type-badge" style="background:' + hexToRgba(typeColor, 0.15) + ';color:' + typeColor + '">' + esc(tag.dataType) + '</span></td>' +
-            '<td><span class="cell-value ' + valueClass + '">' + formatValue(tag.value, tag.quality) + '</span></td>' +
+            '<td><span class="type-badge" style="background:' + hexToRgba(tColor, 0.15) + ';color:' + tColor + '">' + esc(tag.dataType) + '</span></td>' +
+            '<td><span class="cell-value ' + valueClass + '">' + esc(formatValue(tag.value, tag.quality)) + '</span></td>' +
             '<td><span class="quality-badge ' + qualityClass + '">' + qualityLabel(tag.quality) + '</span></td>' +
             '<td class="cell-time">' + esc(tag.timestamp || '--') + '</td>';
 
         // Cache element refs for fast per-scan updates
         state.tblValEls[i] = tr.querySelector('.cell-value');
+        state.tblValEls[i].title = formatValueFull(tag.value, tag.quality);
         state.tblQBadges[i] = tr.querySelector('.quality-badge');
         state.tblTimeEls[i] = tr.querySelector('.cell-time');
 
@@ -458,7 +504,7 @@ function renderTable() {
 
     if (visible === 0) {
         var trEmpty = document.createElement('tr');
-        trEmpty.innerHTML = '<td colspan="7" class="no-results">No tags match the current filter</td>';
+        trEmpty.innerHTML = '<td colspan="7" class="no-results">没有符合筛选条件的标签</td>';
         tbody.appendChild(trEmpty);
     }
 }
@@ -471,11 +517,9 @@ function updateTableValues() {
             var newVal = formatValue(tag.value, tag.quality);
             if (valEl.textContent !== newVal) {
                 valEl.textContent = newVal;
+                valEl.title = formatValueFull(tag.value, tag.quality); // 列宽有限时用省略号截断，完整值放 tooltip
                 valEl.className = 'cell-value ' + (tag.quality === 'Good' ? '' : tag.quality === 'Bad' ? 'bad' : 'unknown');
-                valEl.classList.add('value-updated');
-                (function (el) {
-                    setTimeout(function () { el.classList.remove('value-updated'); }, 500);
-                })(valEl);
+                flashValue(valEl);
             }
         }
         var qBadge = state.tblQBadges[i];
@@ -517,7 +561,7 @@ function updateGroupFilter() {
         groups[state.tags[i].group || 'Default'] = true;
     }
     var keys = Object.keys(groups).sort();
-    var html = '<option value="All">All Groups</option>';
+    var html = '<option value="All">全部分组</option>';
     var found = false;
     for (var k = 0; k < keys.length; k++) {
         var selAttr = keys[k] === current ? ' selected' : '';
@@ -534,6 +578,8 @@ function updateGroupFilter() {
 function toggleSidebar() {
     var collapsed = document.body.classList.toggle('sidebar-collapsed');
     localStorage.setItem('scada-sidebar', collapsed ? 'collapsed' : 'expanded');
+    var btn = document.getElementById('btnSidebar');
+    if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
 }
 
 // ── Value Formatting ──────────────────────────────────────────
@@ -542,20 +588,25 @@ function formatValue(value, quality) {
     if (quality === 'Unknown' || value === null || value === undefined) return '---';
     if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
     if (typeof value === 'number') {
-        if (Number.isInteger(value)) {
-            // Show hex for large unsigned values
-            if (value > 0xFFFF) return value + ' (0x' + value.toString(16).toUpperCase() + ')';
-            return value.toString();
-        }
+        if (Number.isInteger(value)) return value.toString();
         return value.toFixed(4);
     }
     return String(value);
 }
 
+// 完整值（含十六进制注释），列宽有限时截断了才用 tooltip 展示
+function formatValueFull(value, quality) {
+    var base = formatValue(value, quality);
+    if (typeof value === 'number' && Number.isInteger(value) && value > 0xFFFF) {
+        return base + '  (0x' + value.toString(16).toUpperCase() + ')';
+    }
+    return base;
+}
+
 function qualityLabel(q) {
-    if (q === 'Good') return 'Good';
-    if (q === 'Bad') return 'Bad';
-    return 'Unknown';
+    if (q === 'Good') return '良好';
+    if (q === 'Bad') return '异常';
+    return '未知';
 }
 
 // ── Context Menu ──────────────────────────────────────────────
@@ -567,7 +618,7 @@ function showContextMenu(e, index) {
     var tag = state.tags[index];
     var menu = document.getElementById('contextMenu');
     var toggleText = document.getElementById('ctxToggleScanText');
-    toggleText.textContent = tag.scanEnabled ? 'Disable Scan' : 'Enable Scan';
+    toggleText.textContent = tag.scanEnabled ? '停用扫描' : '启用扫描';
 
     var rows = document.querySelectorAll('.data-table tr.selected');
     for (var i = 0; i < rows.length; i++) rows[i].classList.remove('selected');
@@ -624,7 +675,7 @@ function contextDeleteTag() {
     hideContextMenu();
     var idx = state.contextTagIndex;
     if (idx >= 0) {
-        if (confirm('Delete tag "' + state.tags[idx].name + '"?')) {
+        if (confirm('确定删除标签「' + state.tags[idx].name + '」？')) {
             deleteTag(idx);
         }
     }
@@ -639,17 +690,45 @@ function handleDoubleClick(index) {
 
 // ── Tag Editor Modal ──────────────────────────────────────────
 
+// 内联错误提示（比只弹 toast 更靠近问题字段）
+function setFieldError(inputId, errorId, message) {
+    var input = document.getElementById(inputId);
+    var err = document.getElementById(errorId);
+    if (input) input.classList.add('invalid');
+    if (err) {
+        err.textContent = message || '';
+        err.classList.toggle('visible', !!message);
+    }
+}
+
+function clearFieldError(inputId, errorId) {
+    var input = document.getElementById(inputId);
+    var err = document.getElementById(errorId);
+    if (input) input.classList.remove('invalid');
+    if (err) {
+        err.textContent = '';
+        err.classList.remove('visible');
+    }
+}
+
+function clearEditorErrors() {
+    clearFieldError('editorName', 'editorNameError');
+    clearFieldError('editorAddress', 'editorAddressError');
+}
+
 function showAddTagModal() {
     state.editingTagIndex = -1;
-    document.getElementById('tagEditorTitle').textContent = 'Add Tag';
+    state.editorTypeTouched = false; // 新增时允许按地址自动推断类型
+    document.getElementById('tagEditorTitle').textContent = '添加标签';
     document.getElementById('editorName').value = '';
     document.getElementById('editorAddress').value = '';
     document.getElementById('editorDataType').value = 'Bool';
     document.getElementById('editorGroup').value = 'Default';
     document.getElementById('editorComment').value = '';
     document.getElementById('editorScanEnabled').checked = true;
+    clearEditorErrors();
     var preview = document.getElementById('editorPreview');
-    preview.textContent = 'Enter an address to auto-parse...';
+    preview.textContent = '输入地址后自动解析…';
     preview.className = 'field-preview';
     document.getElementById('tagEditorModal').classList.add('visible');
     document.getElementById('editorName').focus();
@@ -660,19 +739,22 @@ function showEditTagModal(index) {
     if (!tag) return;
 
     state.editingTagIndex = index;
-    document.getElementById('tagEditorTitle').textContent = 'Edit Tag';
+    state.editorTypeTouched = true; // 编辑已有标签：保留原数据类型，不被地址后缀覆盖
+    document.getElementById('tagEditorTitle').textContent = '编辑标签';
     document.getElementById('editorName').value = tag.name;
     document.getElementById('editorAddress').value = tag.address;
     document.getElementById('editorDataType').value = tag.dataType;
     document.getElementById('editorGroup').value = tag.group;
     document.getElementById('editorComment').value = tag.comment || '';
     document.getElementById('editorScanEnabled').checked = tag.scanEnabled;
+    clearEditorErrors();
     onAddressChanged();
     document.getElementById('tagEditorModal').classList.add('visible');
 }
 
 function closeTagEditor() {
     document.getElementById('tagEditorModal').classList.remove('visible');
+    clearEditorErrors();
 }
 
 function confirmTagEditor() {
@@ -683,12 +765,21 @@ function confirmTagEditor() {
     var comment = document.getElementById('editorComment').value.trim();
     var scanEnabled = document.getElementById('editorScanEnabled').checked;
 
+    clearEditorErrors();
+
     if (!name) {
-        showToast('Please enter a tag name', 'error');
+        setFieldError('editorName', 'editorNameError', '请填写标签名称');
+        document.getElementById('editorName').focus();
         return;
     }
     if (!address) {
-        showToast('Please enter an address', 'error');
+        setFieldError('editorAddress', 'editorAddressError', '请填写地址');
+        document.getElementById('editorAddress').focus();
+        return;
+    }
+    if (!parseAddress(address)) {
+        setFieldError('editorAddress', 'editorAddressError', '地址无法解析，请检查格式（如 DB1.DBW2 / M0.0）');
+        document.getElementById('editorAddress').focus();
         return;
     }
 
@@ -714,23 +805,28 @@ function confirmTagEditor() {
 function onAddressChanged() {
     var addr = document.getElementById('editorAddress').value.trim().toUpperCase();
     var preview = document.getElementById('editorPreview');
+    clearFieldError('editorAddress', 'editorAddressError');
 
     if (!addr) {
-        preview.textContent = 'Enter an address to auto-parse...';
+        preview.textContent = '输入地址后自动解析…';
         preview.className = 'field-preview';
         return;
     }
 
     var parsed = parseAddress(addr);
     if (parsed) {
-        var text = 'Area: ' + parsed.area + '  |  Type: ' + parsed.dataType + '  |  Offset: ' + parsed.byteOffset;
-        if (parsed.dataType === 'Bool') text += '  |  Bit: ' + parsed.bitOffset;
+        var text = '区域: ' + parsed.area + '   |   类型: ' + parsed.dataType + '   |   字节偏移: ' + parsed.byteOffset;
+        if (parsed.dataType === 'Bool') text += '   |   位: ' + parsed.bitOffset;
         preview.textContent = text;
         preview.className = 'field-preview valid';
-        document.getElementById('editorDataType').value = parsed.dataType;
+        // 仅当用户没有手动选过类型时才用地址后缀联动下拉
+        if (!state.editorTypeTouched) {
+            document.getElementById('editorDataType').value = parsed.dataType;
+        }
     } else {
-        preview.textContent = 'Cannot parse address. Check format.';
+        preview.textContent = '无法解析该地址，请检查格式';
         preview.className = 'field-preview invalid';
+        document.getElementById('editorAddress').classList.add('invalid');
     }
 }
 
@@ -793,21 +889,40 @@ function showWriteValueModal(index) {
     if (!tag) return;
 
     if (!state.connected) {
-        showToast('PLC is not connected. Please connect first.', 'error');
+        showToast('PLC 未连接，无法写入。请先连接。', 'error');
         return;
     }
 
     writeTargetIndex = index;
     document.getElementById('writeTagName').textContent = tag.name;
-    document.getElementById('writeTagAddr').textContent = tag.address;
-    document.getElementById('writeTagCurrent').textContent = 'Current: ' + formatValue(tag.value, tag.quality);
-    document.getElementById('writeValueInput').value = '';
+    document.getElementById('writeTagAddr').textContent = tag.address + '   ·   ' + tag.dataType;
+    document.getElementById('writeTagCurrent').textContent = '当前值: ' + formatValue(tag.value, tag.quality);
+    clearFieldError('writeValueInput', 'writeValueError');
+
+    var input = document.getElementById('writeValueInput');
+    input.value = '';
+    input.placeholder = writePlaceholder(tag.dataType);
     document.getElementById('writeValueModal').classList.add('visible');
-    document.getElementById('writeValueInput').focus();
+    input.focus();
+}
+
+// 按数据类型给出输入提示与取值范围
+function writePlaceholder(dataType) {
+    switch (dataType) {
+        case 'Bool':  return 'true / false（或 1 / 0）';
+        case 'Byte':  return '0 ~ 255，支持 0x1F';
+        case 'Word':  return '0 ~ 65535，支持 0xFFFF';
+        case 'DWord': return '0 ~ 4294967295，支持 0xFFFFFFFF';
+        case 'Int':   return '-32768 ~ 32767';
+        case 'DInt':  return '-2147483648 ~ 2147483647';
+        case 'Real':  return '浮点数，如 12.5';
+        default:      return '输入数值';
+    }
 }
 
 function closeWriteValue() {
     document.getElementById('writeValueModal').classList.remove('visible');
+    clearFieldError('writeValueInput', 'writeValueError');
     writeTargetIndex = -1;
 }
 
@@ -821,37 +936,71 @@ function closeAbout() {
 
 function confirmWriteValue() {
     var input = document.getElementById('writeValueInput').value.trim();
+    clearFieldError('writeValueInput', 'writeValueError');
+
+    function fail(msg) {
+        setFieldError('writeValueInput', 'writeValueError', msg);
+        document.getElementById('writeValueInput').focus();
+    }
+
     if (!input) {
-        showToast('Please enter a value', 'error');
+        fail('请输入要写入的值');
         return;
     }
-    if (writeTargetIndex < 0) return;
+    if (writeTargetIndex < 0 || writeTargetIndex >= state.tags.length) return;
 
     var tag = state.tags[writeTargetIndex];
     var value;
 
     try {
         if (tag.dataType === 'Bool') {
-            value = input.toLowerCase() === 'true' || input === '1';
+            var t = input.toLowerCase();
+            if (!/^(true|false|1|0|on|off)$/.test(t)) {
+                fail('Bool 只接受 true / false（或 1 / 0）');
+                return;
+            }
+            value = (t === 'true' || t === '1' || t === 'on');
         } else if (tag.dataType === 'Real') {
             value = parseFloat(input);
-        } else if (['Byte', 'Word', 'DWord'].indexOf(tag.dataType) >= 0) {
-            value = input.indexOf('0x') === 0 ? parseInt(input, 16) : parseInt(input);
+            if (isNaN(value)) {
+                fail('请输入有效的浮点数');
+                return;
+            }
         } else {
-            value = parseInt(input);
-        }
-
-        if (isNaN(value) && tag.dataType !== 'Bool') {
-            showToast('Cannot parse value: ' + input, 'error');
-            return;
+            var isHex = /^0x/i.test(input);
+            value = isHex ? parseInt(input.slice(2), 16) : parseInt(input, 10);
+            if (isNaN(value)) {
+                fail(isHex ? '十六进制格式不正确，例如 0x1F' : '请输入整数');
+                return;
+            }
+            // DWord 是无符号 32 位：>2^31 时 parseInt 会得到负值，需要转回无符号
+            if (tag.dataType === 'DWord') value = value >>> 0;
         }
     } catch (ex) {
-        showToast('Cannot parse value: ' + input, 'error');
+        fail('无法解析该数值');
+        return;
+    }
+
+    // 范围校验（超出 PLC 侧数据类型宽度会被截断，提前拦下来）
+    var rangeMsg = checkValueRange(tag.dataType, value);
+    if (rangeMsg) {
+        fail(rangeMsg);
         return;
     }
 
     writeValue(writeTargetIndex, value);
     closeWriteValue();
+}
+
+function checkValueRange(dataType, value) {
+    switch (dataType) {
+        case 'Byte':  return (value < 0 || value > 255) ? 'Byte 取值范围 0 ~ 255' : '';
+        case 'Word':  return (value < 0 || value > 65535) ? 'Word 取值范围 0 ~ 65535' : '';
+        case 'DWord': return (value < 0 || value > 4294967295) ? 'DWord 取值范围 0 ~ 4294967295' : '';
+        case 'Int':   return (value < -32768 || value > 32767) ? 'Int 取值范围 -32768 ~ 32767' : '';
+        case 'DInt':  return (value < -2147483648 || value > 2147483647) ? 'DInt 取值范围 -2147483648 ~ 2147483647' : '';
+        default:      return '';
+    }
 }
 
 // ── Window Drag ───────────────────────────────────────────────
@@ -872,11 +1021,38 @@ document.addEventListener('DOMContentLoaded', function () {
     var propFont = document.getElementById('propFont');
     if (propFont) propFont.addEventListener('change', function () { updateSelectedProp('font', parseInt(this.value) || 14); });
 
+    // 标签编辑弹窗：手动选择类型后不再被地址后缀覆盖；输入时即时清除错误
+    var editorType = document.getElementById('editorDataType');
+    if (editorType) editorType.addEventListener('change', function () { state.editorTypeTouched = true; });
+    var editorName = document.getElementById('editorName');
+    if (editorName) editorName.addEventListener('input', function () { clearFieldError('editorName', 'editorNameError'); });
+
+    // 连接中修改扫描周期：立即下发，无需重连
+    var scanInput = document.getElementById('inputScan');
+    if (scanInput) {
+        scanInput.addEventListener('change', function () {
+            var ms = parseInt(this.value) || 100;
+            if (ms < 50) ms = 50;
+            if (ms > 10000) ms = 10000;
+            this.value = ms;
+            if (state.connected) {
+                postToCSharp({ action: 'setScanInterval', ms: ms });
+                showToast('扫描周期已更新为 ' + ms + ' ms', 'success');
+            }
+        });
+    }
+
     // Info-card accordions (click header to collapse/expand)
     var heads = document.querySelectorAll('.info-card-head');
     for (var i = 0; i < heads.length; i++) {
         heads[i].addEventListener('click', function () {
             this.parentElement.classList.toggle('collapsed');
+        });
+        heads[i].addEventListener('keydown', function (e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.parentElement.classList.toggle('collapsed');
+            }
         });
     }
 
@@ -889,6 +1065,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Restore sidebar collapsed state
     if (localStorage.getItem('scada-sidebar') === 'collapsed') {
         document.body.classList.add('sidebar-collapsed');
+        if (btnSidebar) btnSidebar.setAttribute('aria-expanded', 'false');
     }
 });
 
@@ -919,12 +1096,15 @@ document.addEventListener('keydown', function (e) {
         }
     }
 
-    if (e.key === 'F5') { connectPlc(); e.preventDefault(); }
-    if (e.key === 'F6') { disconnectPlc(); e.preventDefault(); }
+    // 大小写无关（CapsLock / Shift 下同样生效）
+    var key = (e.key || '').toLowerCase();
 
-    if (e.ctrlKey && e.key === 'n') { showAddTagModal(); e.preventDefault(); }
-    if (e.ctrlKey && e.key === 's') { saveConfig(); e.preventDefault(); }
-    if (e.ctrlKey && e.key === 'b') { toggleSidebar(); e.preventDefault(); }
+    if (key === 'f5') { connectPlc(); e.preventDefault(); }
+    if (key === 'f6') { disconnectPlc(); e.preventDefault(); }
+
+    if (e.ctrlKey && key === 'n') { showAddTagModal(); e.preventDefault(); }
+    if (e.ctrlKey && key === 's') { saveConfig(); e.preventDefault(); }
+    if (e.ctrlKey && key === 'b') { toggleSidebar(); e.preventDefault(); }
 });
 
 // ── Click Outside Handlers ────────────────────────────────────
@@ -962,6 +1142,8 @@ function switchView(view) {
     document.getElementById('screensView').style.display = view === 'screens' ? 'flex' : 'none';
     document.getElementById('btnViewTable').classList.toggle('active', view === 'table');
     document.getElementById('btnViewScreens').classList.toggle('active', view === 'screens');
+    // 切到画面视图时立即刷新一次组件值，避免显示上一次扫描的旧值
+    if (view === 'screens') updateScreenWidgets();
 }
 
 // ── 画面 CRUD ────────────────────────────────────────────────
@@ -973,9 +1155,12 @@ function renderScreens() {
             var tab = document.createElement('div');
             tab.className = 'screen-tab' + (idx === state.currentScreen ? ' active' : '');
             tab.textContent = state.screens[idx].name;
-            tab.title = '点击切换 · 双击重命名';
+            tab.title = '单击切换 · 双击重命名';
             tab.addEventListener('click', function () { selectScreen(idx); });
-            tab.addEventListener('dblclick', function () { selectScreen(idx); renameCurrentScreen(); });
+            tab.addEventListener('dblclick', function () {
+                selectScreen(idx);
+                beginRenameScreen(idx);
+            });
             tabs.appendChild(tab);
         })(i);
     }
@@ -1001,21 +1186,52 @@ function addScreen() {
     scheduleSaveScreens();
 }
 
-function renameCurrentScreen() {
-    var screen = state.screens[state.currentScreen];
-    if (!screen) return;
-    var name = prompt('输入画面名称：', screen.name);
-    if (name && name.trim()) {
-        screen.name = name.trim();
+// 就地重命名画面 tab（Enter 确认 / Esc 取消 / 失焦确认），比原生 prompt 更贴近桌面应用
+function beginRenameScreen(idx) {
+    var screen = state.screens[idx];
+    var tab = document.querySelectorAll('#screenTabs .screen-tab')[idx];
+    if (!screen || !tab) return;
+
+    tab.setAttribute('contenteditable', 'true');
+    tab.classList.add('editing');
+    tab.focus();
+
+    var range = document.createRange();
+    range.selectNodeContents(tab);
+    var sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+
+    var done = false;
+    function commit(save) {
+        if (done) return;
+        done = true;
+        tab.removeAttribute('contenteditable');
+        tab.classList.remove('editing');
+        var name = (tab.textContent || '').replace(/\s+/g, ' ').trim();
+        if (save && name && name !== screen.name) {
+            screen.name = name;
+            scheduleSaveScreens();
+        }
         renderScreens();
-        scheduleSaveScreens();
     }
+
+    tab.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter') { e.preventDefault(); commit(true); }
+        else if (e.key === 'Escape') { e.preventDefault(); commit(false); }
+        e.stopPropagation(); // 不触发全局快捷键
+    });
+    tab.addEventListener('blur', function () { commit(true); });
+}
+
+function renameCurrentScreen() {
+    beginRenameScreen(state.currentScreen);
 }
 
 function deleteCurrentScreen() {
     if (state.screens.length === 0) return;
     var screen = state.screens[state.currentScreen];
-    if (!screen || !confirm('删除画面 "' + screen.name + '"？')) return;
+    if (!screen || !confirm('确定删除画面「' + screen.name + '」？')) return;
     state.screens.splice(state.currentScreen, 1);
     if (state.currentScreen >= state.screens.length) state.currentScreen = state.screens.length - 1;
     state.selectedWidget = null;
@@ -1043,7 +1259,7 @@ function getWidget(id) {
 
 function addWidget(type) {
     var screen = state.screens[state.currentScreen];
-    if (!screen) { showToast('请先添加画面', 'error'); return; }
+    if (!screen) { showToast('请先新建一个画面', 'error'); return; }
     var w = defaultWidget(type, 'w' + Date.now().toString(36));
     screen.widgets.push(w);
     state.selectedWidget = w.id;
@@ -1114,8 +1330,10 @@ function findTagIndex(name) {
 function updateWidgetDom(w, el) {
     if (!el) return;
 
+    var tagIdx = findTagIndex(w.tag);
+    var tag = tagIdx >= 0 ? state.tags[tagIdx] : null;
+
     if (w.type === 'value') {
-        var tag = findTagIndex(w.tag) >= 0 ? state.tags[findTagIndex(w.tag)] : null;
         var labelEl = el.querySelector('.widget-label');
         if (labelEl) labelEl.textContent = w.label || (tag ? tag.name : '未绑定');
         var valEl = el.querySelector('.widget-value-text');
@@ -1127,16 +1345,18 @@ function updateWidgetDom(w, el) {
             valEl.style.fontSize = (w.font || 20) + 'px';
         }
     } else if (w.type === 'lamp') {
-        var tag2 = findTagIndex(w.tag) >= 0 ? state.tags[findTagIndex(w.tag)] : null;
         var circ = el.querySelector('.widget-lamp-circle');
         if (circ) {
             circ.className = 'widget-lamp-circle';
-            if (tag2 && tag2.quality === 'Good' && typeof tag2.value === 'boolean') {
-                circ.classList.add(tag2.value ? 'on' : 'off');
+            if (tag && tag.quality === 'Good' && typeof tag.value === 'boolean') {
+                circ.classList.add(tag.value ? 'on' : 'off');
             }
         }
         var lbl = el.querySelector('.widget-lamp-label');
-        if (lbl) lbl.textContent = w.label || (tag2 ? tag2.name : '未绑定');
+        if (lbl) {
+            lbl.textContent = w.label || (tag ? tag.name : '未绑定');
+            lbl.style.fontSize = (w.font || 11) + 'px';
+        }
     } else if (w.type === 'text') {
         var tc = el.querySelector('.widget-text-content');
         if (tc) {
@@ -1178,7 +1398,14 @@ function renderProps() {
     sel.innerHTML = html;
 
     document.getElementById('propLabel').value = w.label || '';
-    document.getElementById('propFont').value = w.font || 14;
+    document.getElementById('propFont').value = w.font || defaultFont(w.type);
+}
+
+// 各组件默认字号（与 defaultWidget 保持一致）
+function defaultFont(type) {
+    if (type === 'value') return 20;
+    if (type === 'lamp') return 11;
+    return 16;
 }
 
 function updateSelectedProp(key, value) {

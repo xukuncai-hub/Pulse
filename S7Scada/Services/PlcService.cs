@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
+using System.Threading;
 using S7.Net;
 using S7Scada.Models;
 
@@ -9,14 +9,16 @@ namespace S7Scada.Services;
 /// PLC 通信服务 - 基于 S7.Net
 /// 负责连接管理、批量读取、数据解析、断线重连
 /// </summary>
-public partial class PlcService : IDisposable
+public class PlcService : IDisposable
 {
     private Plc? _plc;
     private readonly object _lock = new();
     private readonly object _commLock = new(); // 串行化 PLC 通信（扫描循环与手动刷新）
     private CancellationTokenSource? _cts;
     private Task? _scanTask;
-    private bool _connected;
+    private volatile int _connecting; // 0=空闲, 1=正在连接（Interlocked 原子保护，防止并发双连）
+    private volatile bool _connected;
+    private volatile bool _errorAlreadyReported; // 本次连接尝试的失败原因是否已上报过
 
     // 事件
     public event Action? Connected;
@@ -35,19 +37,6 @@ public partial class PlcService : IDisposable
     public int ScanInterval { get; set; } = 100;
 
     private List<TagConfig> _tags = [];
-
-    // MLFB 解析
-    [GeneratedRegex(@"6ES7\s*(\d)(\d{2})", RegexOptions.IgnoreCase)]
-    private static partial Regex MlfbRegex();
-
-    [GeneratedRegex(@"6ES7\d{3}")]
-    private static partial Regex MlfbPrefixRegex();
-
-    [GeneratedRegex(@"V(\d+)\.(\d+)")]
-    private static partial Regex FirmwareRegex();
-
-    [GeneratedRegex(@"(6ES7)(\d)(\d{2})(.{5})(.{4})")]
-    private static partial Regex MlfbFormatRegex();
 
     /// <summary>设置连接参数</summary>
     public void SetConnection(string ip, int rack = 0, int slot = 1, CpuType cpu = CpuType.S71200)
@@ -71,20 +60,33 @@ public partial class PlcService : IDisposable
     public async Task ConnectAsync()
     {
         if (_connected) return;
+        // 原子 CAS：如果已在连接中（_connecting==1），直接返回，防止并发双连
+        if (Interlocked.CompareExchange(ref _connecting, 1, 0) != 0) return;
 
-        _cts?.Dispose();
-        _cts = new CancellationTokenSource();
-        _scanTask = Task.Run(() => ScanLoopAsync(_cts.Token));
-        await Task.CompletedTask;
+        try
+        {
+            _cts?.Dispose();
+            _cts = new CancellationTokenSource();
+            _scanTask = Task.Run(() => ScanLoopAsync(_cts.Token));
+            await Task.CompletedTask;
+        }
+        finally
+        {
+            _connecting = 0;
+        }
     }
 
     /// <summary>断开 PLC</summary>
     public async Task DisconnectAsync()
     {
         _cts?.Cancel();
-        if (_scanTask != null)
+        var task = _scanTask;
+        _scanTask = null;
+        if (task != null)
         {
-            try { await _scanTask; } catch { }
+            // 扫描循环收尾时会统一清理连接并触发一次 Disconnected
+            try { await task; } catch { }
+            return;
         }
         DisconnectInternal();
     }
@@ -109,27 +111,31 @@ public partial class PlcService : IDisposable
     /// <summary>写入标签值到 PLC</summary>
     public (bool Success, string Message) WriteTag(TagConfig tag, object value)
     {
-        if (!_connected || _plc == null)
-            return (false, "PLC 未连接");
-
-        try
+        // 与扫描循环（ScanTags 已持 _commLock）共用串行锁，避免并发读写同一个 S7 连接
+        lock (_commLock)
         {
-            if (tag.DataType == TagDataType.Bool)
-                return WriteBool(tag, value);
+            if (!_connected || _plc == null)
+                return (false, "PLC 未连接");
 
-            byte[]? data = ValueToBytes(value, tag.DataType);
-            if (data == null) return (false, "值转换失败");
+            try
+            {
+                if (tag.DataType == TagDataType.Bool)
+                    return WriteBool(tag, value);
 
-            if (tag.Area == Area.DB)
-                _plc.WriteBytes(S7.Net.DataType.DataBlock, (ushort)tag.DbNumber, tag.ByteOffset, data);
-            else
-                _plc.WriteBytes(tag.Area.ToS7NetArea(), (ushort)tag.DbNumber, tag.ByteOffset, data);
+                byte[]? data = ValueToBytes(value, tag.DataType);
+                if (data == null) return (false, "值转换失败");
 
-            return (true, "写入成功");
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
+                if (tag.Area == Area.DB)
+                    _plc.WriteBytes(S7.Net.DataType.DataBlock, (ushort)tag.DbNumber, tag.ByteOffset, data);
+                else
+                    _plc.WriteBytes(tag.Area.ToS7NetArea(), (ushort)tag.DbNumber, tag.ByteOffset, data);
+
+                return (true, "写入成功");
+            }
+            catch (Exception ex)
+            {
+                return (false, ex.Message);
+            }
         }
     }
 
@@ -171,9 +177,9 @@ public partial class PlcService : IDisposable
                 }
 
                 // 连接已断开则停止扫描（不自动重连）
+                // 注意：不在此处触发 Disconnected 事件，统一由 DisconnectInternal 触发，避免双重触发
                 if (_plc == null || !_plc.IsConnected)
                 {
-                    Disconnected?.Invoke("连接已断开");
                     break;
                 }
 
@@ -191,10 +197,17 @@ public partial class PlcService : IDisposable
 
     private void DisconnectInternal()
     {
+        // 连接失败时 ConnectionError 已经把失败原因推给界面，
+        // 这里不再紧跟一条 Disconnected 把状态文字覆盖回去（保留失败原因可见）。
+        bool errorAlreadyReported = _errorAlreadyReported;
+        _errorAlreadyReported = false;
+
         _connected = false;
         try { _plc?.Close(); } catch { }
         _plc = null;
-        Disconnected?.Invoke("");
+
+        if (!errorAlreadyReported)
+            Disconnected?.Invoke("Disconnected");
     }
 
     /// <summary>
@@ -229,10 +242,13 @@ public partial class PlcService : IDisposable
             }
 
             // 连接超时或用户已取消（取消时不上报错误）
-            try { _plc.Close(); } catch { }
+            try { _plc?.Close(); } catch { }
             _plc = null;
             if (!ct.IsCancellationRequested)
+            {
+                _errorAlreadyReported = true;
                 ConnectionError?.Invoke($"连接超时（{connectTimeoutMs / 1000}s 内无响应）");
+            }
             return false;
         }
         catch (Exception ex)
@@ -240,7 +256,10 @@ public partial class PlcService : IDisposable
             try { _plc?.Close(); } catch { }
             _plc = null;
             if (!ct.IsCancellationRequested)
+            {
+                _errorAlreadyReported = true;
                 ConnectionError?.Invoke(ex.Message);
+            }
             return false;
         }
     }
@@ -390,56 +409,6 @@ public partial class PlcService : IDisposable
             info.Module = "S7 PLC";
             PlcInfoReceived?.Invoke(info);
         }
-    }
-
-    private void ParseSzlData(byte[] data, PlcInfo info)
-    {
-        try
-        {
-            // 尝试从数据中提取 ASCII 字符串
-            string text = System.Text.Encoding.ASCII.GetString(data);
-            string clean = Regex.Replace(text, @"[^\x20-\x7E]", "");
-
-            // 查找 MLFB 订货号 (6ES7...)
-            var mlfbMatch = Regex.Match(clean, @"6ES7[\d\w\-]{10,20}");
-            if (mlfbMatch.Success)
-            {
-                info.OrderCode = mlfbMatch.Value;
-                info.Module = MlfbToName(mlfbMatch.Value);
-            }
-
-            // 查找固件版本
-            var fwMatch = FirmwareRegex().Match(clean);
-            if (fwMatch.Success)
-                info.FirmwareVersion = fwMatch.Value;
-
-            // 查找序列号
-            var segments = text.Split('\0', StringSplitOptions.RemoveEmptyEntries);
-            foreach (var seg in segments)
-            {
-                string s = seg.Trim();
-                if (Regex.IsMatch(s, @"^[A-Z0-9]{6,24}$") && !s.Contains("6ES7"))
-                {
-                    info.SerialNumber = s;
-                    break;
-                }
-            }
-        }
-        catch { }
-    }
-
-    private static string MlfbToName(string mlfb)
-    {
-        var m = MlfbRegex().Match(mlfb.Replace("-", "").Replace(" ", ""));
-        if (m.Success)
-        {
-            string familyNum = m.Groups[1].Value;
-            string model = m.Groups[2].Value;
-            return familyNum is "2" or "5"
-                ? $"S7-1{familyNum}{model}"
-                : $"S7-{familyNum}{model}";
-        }
-        return mlfb;
     }
 
     // ── 字节解析 ────────────────────────────────────────
