@@ -30,6 +30,9 @@ Thumbs.db
 s7_tags.json
 screens.json
 
-# Publish output
+# Publish output / 本地解压产物（勿提交仓库）
 publish/
+S7Scada-win-x64/
+S7Scada-win-x86/
+S7Scada-win-arm64/
 *.zip

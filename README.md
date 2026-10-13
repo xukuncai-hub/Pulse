@@ -82,8 +82,30 @@ dotnet publish S7Scada/S7Scada.csproj -c Release -o publish
 5. 布局自动保存，重启后保留
 
 ### 4. PLCSIM 仿真
-- **S7-PLCSIM（基础）**：IP 填 `127.0.0.1`
-- **S7-PLCSIM Advanced**：启用 `PLCSIM Virtual Eth. Adapter`，填实例 IP；需先把实例设为 RUN 并下载程序
+
+> ⚠️ **仿真时不要填 `127.0.0.1`**。该地址的 102 端口由西门子 OAM 服务占用，它**不响应标准 S7 报文**（连接会被直接掐断，报 `TPKT is incomplete / invalid`），任何第三方客户端都连不上。请一律填**实例自己的 IP**。
+
+**推荐：S7-PLCSIM Advanced**
+
+1. 先装 [Npcap](https://npcap.com/)（安装时**保持默认选项**，不要勾 `WinPcap API-compatible Mode`）。
+   不装的话控制面板会报 `Npcap service is not running`，**实例根本起不来**。
+2. 打开 PLCSIM Advanced 控制面板，把 `Online Access` 设为 **`TCP/IP Single Adapter`**。
+3. 在 `Start Simulated PLC Instance` 里填实例名 / IP（如 `192.168.0.1`）/ PLC 型号，点 **Start**。
+4. 启动后 `1 Active PLC Instance(s)` 里会显示实例的 **`IP address [X1]`** —— **把这个 IP 填进软件的「PLC IP」**。
+5. 软件里的 CPU 型号按实例实际型号选（实例是 S7-1500 就选 S7-1500），机架 0 / 插槽 1。
+6. 还需把工程**下载到该实例**（见下方「无论哪种仿真，都还需满足」），否则 DB 类标签会读不到。
+
+**经典 S7-PLCSIM（V18 / V21）**
+
+- 默认通信模式是 **`PLCSIM Softbus（仅限内部）`**，此模式下 PLC 不接入 TCP/IP，第三方客户端连不上。
+- 要用本软件连接：**先停止实例** → 把通信模式改为 **`TCP/IP 单适配器`** → 重新下载 / 启动 → 填实例卡片上 **`X1`** 显示的 IP（须与 PLCSIM 虚拟网卡同网段）。
+- 注：本软件的仿真验证是在 **PLCSIM Advanced** 上完成的；经典 PLCSIM 若出现"切模式后实例丢失 IP / 重新下载失败"，需先在西门子侧解决该问题。
+
+**无论哪种仿真，都还需满足（否则连上也读不到值）**
+
+- TIA 工程里：CPU 属性 → 防护与安全 → 勾选 **「允许 PUT/GET 通信」**
+- DB 属性 → **取消「优化的块访问」** → 重新编译
+- CPU 处于 **RUN** 模式
 
 ## 📁 项目结构
 
@@ -110,6 +132,11 @@ S7Scada/
 ## 🔧 常见问题
 
 - **连接超时**：检查 IP / 网段 / PLC 是否可 ping 通；仿真环境检查虚拟网卡配置
+- **仿真连不上 / 一直停在"连接中…"**：
+  - 确认填的是**实例 IP**（PLCSIM Advanced 控制面板里的 `IP address [X1]`），**不是 `127.0.0.1`**
+  - PLCSIM Advanced 必须先装 **Npcap**，否则实例起不来
+  - 经典 PLCSIM 默认的 `PLCSIM Softbus（仅限内部）` 模式外部连不上，需先停实例再改成 `TCP/IP 单适配器`
+- **连上后 DB 标签显示"异常"、数值为 `---`**：PLC 返回 `Address out of range`，说明该实例里**没有下载程序**（DB 不存在）。把工程下载到实例，并开启 PUT/GET、关闭 DB 的"优化的块访问"
 - **连上但看不到数值**：确认标签 `scan_enabled` 为开（右键菜单可恢复）；确认地址在 PLC 中存在
 - **读不到 DB 数据**：TIA 里把 DB 的"优化的块访问"关闭并重新编译
 - **WebView2 报错**：安装微软 WebView2 Runtime
