@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Pulse S7 监控台</title>
+    <title>Pulse</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -115,32 +115,53 @@
                     </div>
                     <div class="conn-form">
                         <div class="field">
+                            <label class="field-label" for="inputProtocol">通信协议</label>
+                            <select class="field-input" id="inputProtocol" onchange="onProtocolChanged()">
+                                <option value="S7" selected>S7（西门子）</option>
+                                <option value="ModbusTcp">Modbus TCP（通用）</option>
+                            </select>
+                        </div>
+                        <div class="field">
                             <label class="field-label" for="inputIp">PLC IP 地址</label>
                             <input type="text" class="field-input mono" id="inputIp" value="192.168.0.1" placeholder="192.168.0.1"
                                    spellcheck="false" autocomplete="off" inputmode="decimal">
                         </div>
-                        <div class="field">
-                            <label class="field-label" for="inputCpu">CPU 型号</label>
-                            <select class="field-input" id="inputCpu">
-                                <option value="S71200" selected>S7-1200</option>
-                                <option value="S71500">S7-1500</option>
-                                <option value="S7300">S7-300</option>
-                                <option value="S7400">S7-400</option>
-                            </select>
+                        <div id="s7Fields">
+                            <div class="field">
+                                <label class="field-label" for="inputCpu">CPU 型号</label>
+                                <select class="field-input" id="inputCpu">
+                                    <option value="S71200" selected>S7-1200</option>
+                                    <option value="S71500">S7-1500</option>
+                                    <option value="S7300">S7-300</option>
+                                    <option value="S7400">S7-400</option>
+                                </select>
+                            </div>
+                            <div class="field-row-2">
+                                <div class="field">
+                                    <label class="field-label" for="inputRack">机架</label>
+                                    <input type="number" class="field-input" id="inputRack" value="0" min="0" max="7">
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="inputSlot">插槽</label>
+                                    <input type="number" class="field-input" id="inputSlot" value="1" min="0" max="31">
+                                </div>
+                            </div>
                         </div>
-                        <div class="field-row-3">
-                            <div class="field">
-                                <label class="field-label" for="inputRack">机架</label>
-                                <input type="number" class="field-input" id="inputRack" value="0" min="0" max="7">
+                        <div id="modbusFields" style="display:none">
+                            <div class="field-row-2">
+                                <div class="field">
+                                    <label class="field-label" for="inputPort">端口</label>
+                                    <input type="number" class="field-input" id="inputPort" value="502" min="1" max="65535">
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="inputUnit">从站号</label>
+                                    <input type="number" class="field-input" id="inputUnit" value="1" min="0" max="247">
+                                </div>
                             </div>
-                            <div class="field">
-                                <label class="field-label" for="inputSlot">插槽</label>
-                                <input type="number" class="field-input" id="inputSlot" value="1" min="0" max="31">
-                            </div>
-                            <div class="field">
-                                <label class="field-label" for="inputScan">周期 ms</label>
-                                <input type="number" class="field-input" id="inputScan" value="100" min="50" max="10000" step="50">
-                            </div>
+                        </div>
+                        <div class="field">
+                            <label class="field-label" for="inputScan">扫描周期 ms</label>
+                            <input type="number" class="field-input" id="inputScan" value="100" min="50" max="10000" step="50">
                         </div>
                         <button class="btn btn-green btn-full" id="btnConnectSidebar" onclick="connectPlc()">
                             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -180,7 +201,7 @@
                 </div>
 
                 <!-- TIA Portal Info -->
-                <div class="info-card info-card-amber">
+                <div class="info-card info-card-amber" id="tiaCard">
                     <div class="info-card-head" role="button" tabindex="0">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                             <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
@@ -193,6 +214,23 @@
                         <li>CPU 属性 &rarr; 防护与安全 &rarr; 勾选"允许 PUT/GET 通信"</li>
                         <li>DB 属性 &rarr; 取消勾选"优化的块访问"并重新编译</li>
                         <li>确认 CPU 处于 RUN 模式</li>
+                    </ol>
+                </div>
+
+                <!-- Modbus TCP Info（选择 Modbus 协议时显示） -->
+                <div class="info-card info-card-amber" id="modbusCard" style="display:none">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <span>Modbus TCP 设置</span>
+                    </div>
+                    <ol class="info-list">
+                        <li>确认设备已启用 Modbus TCP 服务并开放端口（默认 502）</li>
+                        <li>从站号（Unit ID）需与设备组态一致，多数设备为 1</li>
+                        <li>寄存器按大端字序（高字在前 AB CD）解析</li>
                     </ol>
                 </div>
 
@@ -212,7 +250,12 @@ DB1.DBW2     Word / Int
 DB1.DBD4     DWord / DInt / Real
 M0.0  M 位    I0.0  输入
 Q0.0  输出    MW2   M 字
-T0    定时器  C0    计数器</div>
+T0    定时器  C0    计数器
+—— Modbus ——
+HR100 保持寄存器(读写)
+IR100 输入寄存器(只读)
+CO0   线圈(读写)  DI0 离散输入
+40001 / 30001 / 10001 / 00001</div>
                 </div>
 
                 <!-- Shortcuts -->
@@ -234,7 +277,8 @@ T0    定时器  C0    计数器</div>
 Ctrl+N 添加标签
 Ctrl+S 保存配置
 Ctrl+B 折叠侧边栏
-双击写值 · 右键菜单</div>
+双击写值 · 右键菜单
+画面：Del 删除 · Ctrl+D 复制 · Ctrl+Z 撤销</div>
                 </div>
             </div>
         </aside>
@@ -344,37 +388,55 @@ Ctrl+B 折叠侧边栏
                     </div>
                 </div>
 
-                <div class="screen-toolbar">
-                    <span class="screen-toolbar-label">添加组件</span>
+                <div class="screen-toolbar" id="screenToolbar">
+                    <span class="screen-toolbar-label">添加</span>
                     <button class="btn btn-blue btn-sm" onclick="addWidget('value')" title="数值显示组件">数值</button>
                     <button class="btn btn-green btn-sm" onclick="addWidget('lamp')" title="指示灯组件">指示灯</button>
                     <button class="btn btn-ghost btn-sm" onclick="addWidget('text')" title="文本组件">文本</button>
+                    <button class="btn btn-ghost btn-sm" onclick="addWidget('bar')" title="棒图 / 进度条组件">棒图</button>
+                    <button class="btn btn-ghost btn-sm" onclick="addWidget('button')" title="按钮组件（预览时点击可写值）">按钮</button>
+                    <button class="btn btn-ghost btn-sm" onclick="addWidget('rect')" title="矩形色块 / 装饰框">矩形</button>
+                    <div class="stb-sep"></div>
+                    <span class="screen-toolbar-label">编辑</span>
+                    <button class="btn btn-ghost btn-sm stb-toggle active" id="btnGrid" onclick="toggleGrid()" title="显示 / 隐藏网格">网格</button>
+                    <button class="btn btn-ghost btn-sm stb-toggle active" id="btnSnap" onclick="toggleSnap()" title="拖动 / 缩放吸附到网格">吸附</button>
+                    <div class="stb-sep"></div>
+                    <span class="screen-toolbar-label">对齐</span>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="left" onclick="alignWidgets('left')" title="左对齐" aria-label="左对齐" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="4" x2="3" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="6" y="14" width="7" height="4" rx="1"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="right" onclick="alignWidgets('right')" title="右对齐" aria-label="右对齐" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="21" y1="4" x2="21" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="11" y="14" width="7" height="4" rx="1"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="top" onclick="alignWidgets('top')" title="顶对齐" aria-label="顶对齐" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="3" x2="20" y2="3"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="6" width="4" height="7" rx="1"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="bottom" onclick="alignWidgets('bottom')" title="底对齐" aria-label="底对齐" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="21" x2="20" y2="21"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="11" width="4" height="7" rx="1"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="hcenter" onclick="alignWidgets('hcenter')" title="水平居中" aria-label="水平居中" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="3" x2="12" y2="21"/><rect x="4" y="6" width="16" height="4" rx="1"/><rect x="7" y="14" width="10" height="4" rx="1"/></svg>
+                    </button>
+                    <button class="btn btn-ghost btn-sm icon-btn" data-align="vcenter" onclick="alignWidgets('vcenter')" title="垂直居中" aria-label="垂直居中" disabled>
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/></svg>
+                    </button>
+                    <div class="stb-sep"></div>
+                    <span class="screen-toolbar-label">层级</span>
+                    <button class="btn btn-ghost btn-sm" data-z="front" onclick="bringToFront()" title="置于顶层" disabled>置顶</button>
+                    <button class="btn btn-ghost btn-sm" data-z="back" onclick="sendToBack()" title="置于底层" disabled>置底</button>
+                    <span class="screen-toolbar-hint">拖动移动 · 右下角缩放</span>
                     <div class="tb-spacer"></div>
-                    <span class="screen-toolbar-label">拖拽摆放 · 拖动右下角缩放</span>
+                    <button class="btn btn-ghost btn-sm stb-toggle" id="btnPreview" onclick="togglePreview()" title="预览（运行）模式：可点击按钮写值">预览</button>
                     <button class="btn btn-red btn-sm" id="btnDeleteWidget" onclick="deleteSelectedWidget()" disabled>删除选中</button>
                 </div>
 
-                <div class="widget-props" id="widgetProps" style="display:none">
-                    <span class="widget-props-title">组件属性</span>
-                    <div class="field prop-field">
-                        <label class="field-label" for="propTag">绑定标签</label>
-                        <select class="field-input" id="propTag"></select>
-                    </div>
-                    <div class="field prop-field">
-                        <label class="field-label" for="propLabel">显示文字</label>
-                        <input type="text" class="field-input" id="propLabel" placeholder="留空则显示标签名" spellcheck="false" autocomplete="off">
-                    </div>
-                    <div class="field prop-field">
-                        <label class="field-label" for="propFont">字号</label>
-                        <input type="number" class="field-input" id="propFont" value="14" min="9" max="64">
-                    </div>
-                </div>
+                <div class="widget-props" id="widgetProps" style="display:none"></div>
 
                 <div class="canvas-wrap">
                     <div class="canvas" id="screenCanvas"></div>
                     <div class="screen-empty" id="screenEmpty" style="display:none">
                         <div class="empty-title">还没有画面</div>
-                        <div class="empty-desc">点击右上角 <strong>新建画面</strong> 创建一个上位机画面<br>然后在画布上添加数值 / 指示灯 / 文本组件</div>
+                        <div class="empty-desc">点击右上角 <strong>新建画面</strong> 创建一个上位机画面<br>然后在画布上添加组件：数值 / 指示灯 / 文本 / 棒图 / 按钮 / 矩形</div>
                     </div>
                 </div>
             </div><!-- /#screensView -->
@@ -531,7 +593,7 @@ Ctrl+B 折叠侧边栏
     <div class="modal-overlay" id="aboutModal">
         <div class="modal modal-sm" role="dialog" aria-modal="true" aria-labelledby="aboutTitle">
             <div class="modal-head">
-                <h3 class="modal-title" id="aboutTitle">关于 Pulse S7 监控台</h3>
+                <h3 class="modal-title" id="aboutTitle">关于 Pulse</h3>
                 <button class="modal-x" onclick="closeAbout()" aria-label="关闭">&times;</button>
             </div>
             <div class="modal-body about-body">
@@ -555,14 +617,14 @@ Ctrl+B 折叠侧边栏
                         <circle cx="19.1" cy="7.1" r="2" fill="#34D17A"/>
                     </svg>
                 </div>
-                <div class="about-name">Pulse S7 监控台</div>
-                <div class="about-ver">Pulse · 版本 v1.1</div>
-                <div class="about-desc">西门子 S7 系列上位机监控软件<br>现场脉搏，实时可见</div>
+                <div class="about-name">Pulse</div>
+                <div class="about-ver">Pulse · 版本 v1.2</div>
+                <div class="about-desc">西门子 S7 / Modbus TCP 上位机监控软件<br>现场脉搏，实时可见</div>
                 <div class="about-rows">
-                    <div class="about-row"><span class="about-k">名称</span><span class="about-v">Pulse（脉动）· S7 监控台</span></div>
+                    <div class="about-row"><span class="about-k">名称</span><span class="about-v">Pulse（脉动）</span></div>
                     <div class="about-row"><span class="about-k">作者</span><span class="about-v">xukuncai</span></div>
                     <div class="about-row"><span class="about-k">邮箱</span><span class="about-v">xukuncai0001@gmail.com</span></div>
-                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WinUI 3 / WebView2 / S7netplus</span></div>
+                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WinUI 3 / WebView2 / S7netplus / NModbus</span></div>
                     <div class="about-row"><span class="about-k">源码</span>
                         <a class="about-link" href="https://github.com/xukuncai-hub/s7-scada" target="_blank" rel="noopener noreferrer">github.com/xukuncai-hub/s7-scada</a>
                     </div>

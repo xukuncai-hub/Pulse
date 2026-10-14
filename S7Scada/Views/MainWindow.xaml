@@ -2,7 +2,7 @@
     x:Class="S7Scada.Views.MainWindow"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Title="Pulse S7 监控台">
+    Title="Pulse">
     <!--
         系统原生标题栏：最大化/最小化由 Windows 播放原生动画（同 VS Code / 普通窗口）。
         标题栏深色由 HandleTheme 通过 DWM 设置，随应用主题切换。

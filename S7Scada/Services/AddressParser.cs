@@ -46,7 +46,9 @@ public static partial class AddressParser
 
                 return typeChar switch
                 {
-                    'X' => new ParsedAddress(Area.DB, TagDataType.Bool, dbNum, offset, bitPart ?? 0, address),
+                    'X' => (bitPart ?? 0) <= 7
+                        ? new ParsedAddress(Area.DB, TagDataType.Bool, dbNum, offset, bitPart ?? 0, address)
+                        : null,
                     'B' => new ParsedAddress(Area.DB, TagDataType.Byte, dbNum, offset, 0, address),
                     'W' => new ParsedAddress(Area.DB, TagDataType.Word, dbNum, offset, 0, address),
                     'D' => new ParsedAddress(Area.DB, TagDataType.DWord, dbNum, offset, 0, address),
@@ -76,7 +78,9 @@ public static partial class AddressParser
 
             // 没有 typeChar 但有 bitPart → Bool 位地址 (如 M0.0)
             if (typeChar == null && bitPart.HasValue)
-                return new ParsedAddress(area, TagDataType.Bool, 0, offset, bitPart.Value, address);
+                return bitPart.Value <= 7
+                    ? new ParsedAddress(area, TagDataType.Bool, 0, offset, bitPart.Value, address)
+                    : null;
 
             // 没有 typeChar 也没有 bitPart → 默认 Word (如 T0, C0)
             if (typeChar == null && !bitPart.HasValue)
@@ -87,7 +91,9 @@ public static partial class AddressParser
             {
                 return typeChar.Value switch
                 {
-                    'X' => new ParsedAddress(area, TagDataType.Bool, 0, offset, bitPart ?? 0, address),
+                    'X' => (bitPart ?? 0) <= 7
+                        ? new ParsedAddress(area, TagDataType.Bool, 0, offset, bitPart ?? 0, address)
+                        : null,
                     'B' => new ParsedAddress(area, TagDataType.Byte, 0, offset, 0, address),
                     'W' => new ParsedAddress(area, TagDataType.Word, 0, offset, 0, address),
                     'D' => new ParsedAddress(area, TagDataType.DWord, 0, offset, 0, address),

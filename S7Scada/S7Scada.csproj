@@ -12,7 +12,7 @@
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <Platforms>x64;x86;ARM64</Platforms>
-    <AssemblyName>S7Scada</AssemblyName>
+    <AssemblyName>Pulse</AssemblyName>
     <RootNamespace>S7Scada</RootNamespace>
     <!-- 应用图标（EXE 图标 + 运行时窗口/任务栏图标共用同一份多尺寸 ICO） -->
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
@@ -27,6 +27,8 @@
          以获得 CreateAsync(userDataFolder) 与 EventHandler 风格事件的现代 API 投影 -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="S7netplus" Version="0.20.*" />
+    <!-- Modbus TCP 驱动（NModbus） -->
+    <PackageReference Include="NModbus" Version="3.0.*" />
   </ItemGroup>
 
   <ItemGroup>
@@ -47,10 +49,10 @@
                              RelativePath="Views\MainWindow.xbf"
                              CopyToPublishDirectory="PreserveNewest"
                              Condition="Exists('$(BaseOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\Views\MainWindow.xbf')" />
-      <ResolvedFileToPublish Include="$(BaseOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\S7Scada.pri"
-                             RelativePath="S7Scada.pri"
+      <ResolvedFileToPublish Include="$(BaseOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\Pulse.pri"
+                             RelativePath="Pulse.pri"
                              CopyToPublishDirectory="PreserveNewest"
-                             Condition="Exists('$(BaseOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\S7Scada.pri')" />
+                             Condition="Exists('$(BaseOutputPath)$(Configuration)\$(TargetFramework)\$(RuntimeIdentifier)\Pulse.pri')" />
     </ItemGroup>
   </Target>
 

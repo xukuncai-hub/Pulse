@@ -1,5 +1,5 @@
 /* ================================================================
-   Pulse S7 监控台 — JavaScript Bridge & UI Controller
+   Pulse — JavaScript Bridge & UI Controller
    ================================================================ */
 
 // ── State ─────────────────────────────────────────────────────
@@ -14,7 +14,11 @@ var state = {
     view: 'table',
     screens: [],
     currentScreen: -1,
-    selectedWidget: null,
+    selectedWidgets: [],   // 当前选中的组件 id 列表（支持多选）
+    clipboard: null,       // 复制板（组件深拷贝）
+    preview: false,        // 预览（运行）模式
+    snap: true,            // 拖动 / 缩放吸附到 10px 网格
+    showGrid: true,        // 显示网格
     // Cached DOM element references (avoid repeated getElementById per scan)
     dashValEls: {},
     tblValEls: {},
@@ -69,7 +73,10 @@ function getCssVar(name) {
 var COLOR_FALLBACK = '#2563eb';
 
 function areaColor(area) {
-    return getCssVar('--area-' + String(area || 'M').toLowerCase()) || COLOR_FALLBACK;
+    var key = String(area || 'M');
+    // Modbus 的四个寄存器区共用一个配色令牌
+    if (key.indexOf('Modbus') === 0) key = 'modbus';
+    return getCssVar('--area-' + key.toLowerCase()) || COLOR_FALLBACK;
 }
 
 function typeColor(dataType) {
@@ -180,11 +187,10 @@ if (window.chrome && window.chrome.webview) {
 }
 
 function connectPlc() {
+    var protocol = currentProtocol();
+    var isModbus = protocol === 'ModbusTcp';
     var ip = document.getElementById('inputIp').value.trim();
-    var rack = parseInt(document.getElementById('inputRack').value) || 0;
-    var slot = parseInt(document.getElementById('inputSlot').value) || 1;
     var scanInterval = parseInt(document.getElementById('inputScan').value) || 500;
-    var cpu = document.getElementById('inputCpu').value;
 
     if (!ip) {
         showToast('请先填写 PLC 的 IP 地址', 'error');
@@ -201,14 +207,62 @@ function connectPlc() {
     var connIp = document.getElementById('connIp');
     if (connIp) connIp.textContent = ip;
 
-    postToCSharp({
+    var payload = {
         action: 'connect',
+        protocol: protocol,
         ip: ip,
-        rack: rack,
-        slot: slot,
-        scanInterval: scanInterval,
-        cpu: cpu
-    });
+        scanInterval: scanInterval
+    };
+    if (isModbus) {
+        payload.port = parseInt(document.getElementById('inputPort').value) || 502;
+        payload.unitId = parseInt(document.getElementById('inputUnit').value) || 1;
+    } else {
+        payload.rack = parseInt(document.getElementById('inputRack').value) || 0;
+        payload.slot = parseInt(document.getElementById('inputSlot').value) || 1;
+        payload.cpu = document.getElementById('inputCpu').value;
+    }
+    postToCSharp(payload);
+}
+
+// ── 协议切换 ──────────────────────────────────────────────────
+function currentProtocol() {
+    var el = document.getElementById('inputProtocol');
+    return el ? el.value : 'S7';
+}
+
+function onProtocolChanged() {
+    var protocol = currentProtocol();
+    var isModbus = protocol === 'ModbusTcp';
+
+    // 表单：Modbus 用端口 / 从站号，S7 用 CPU / 机架 / 插槽
+    var s7 = document.getElementById('s7Fields');
+    if (s7) s7.style.display = isModbus ? 'none' : '';
+    var mb = document.getElementById('modbusFields');
+    if (mb) mb.style.display = isModbus ? '' : 'none';
+
+    // 侧边栏信息卡：两种协议各显示对应的设置提示
+    var tia = document.getElementById('tiaCard');
+    if (tia) tia.style.display = isModbus ? 'none' : '';
+    var mbc = document.getElementById('modbusCard');
+    if (mbc) mbc.style.display = isModbus ? '' : 'none';
+
+    // 标签地址输入提示随协议变化
+    var addr = document.getElementById('editorAddress');
+    if (addr) addr.placeholder = isModbus ? '例如：HR100 / 40001 / CO0' : '例如：DB1.DBW2';
+    var preview = document.getElementById('editorPreview');
+    if (preview) { preview.textContent = '输入地址后自动解析…'; preview.className = 'field-preview'; }
+
+    // 通知 C# 侧当前协议，新增/编辑标签时按此选择地址解析器
+    postToCSharp({ action: 'setProtocol', protocol: protocol });
+}
+
+// Modbus 区域中文名
+function areaLabel(a) {
+    if (a === 'HR') return '保持寄存器(4x)';
+    if (a === 'IR') return '输入寄存器(3x)';
+    if (a === 'CO') return '线圈(0x)';
+    if (a === 'DI') return '离散输入(1x)';
+    return a;
 }
 
 function disconnectPlc() {
@@ -815,8 +869,13 @@ function onAddressChanged() {
 
     var parsed = parseAddress(addr);
     if (parsed) {
-        var text = '区域: ' + parsed.area + '   |   类型: ' + parsed.dataType + '   |   字节偏移: ' + parsed.byteOffset;
-        if (parsed.dataType === 'Bool') text += '   |   位: ' + parsed.bitOffset;
+        var text;
+        if (parsed.modbus) {
+            text = '区域: ' + areaLabel(parsed.area) + '   |   类型: ' + parsed.dataType + '   |   寄存器地址: ' + parsed.byteOffset;
+        } else {
+            text = '区域: ' + parsed.area + '   |   类型: ' + parsed.dataType + '   |   字节偏移: ' + parsed.byteOffset;
+            if (parsed.dataType === 'Bool') text += '   |   位: ' + parsed.bitOffset;
+        }
         preview.textContent = text;
         preview.className = 'field-preview valid';
         // 仅当用户没有手动选过类型时才用地址后缀联动下拉
@@ -830,8 +889,49 @@ function onAddressChanged() {
     }
 }
 
-// Client-side address parser (mirrors AddressParser.cs)
+// 按当前协议选择解析器
 function parseAddress(addr) {
+    return currentProtocol() === 'ModbusTcp' ? parseModbusAddress(addr) : parseS7Address(addr);
+}
+
+// Modbus 地址解析（镜像 ModbusAddressParser.cs）
+// 支持 HR/IR/CO/DI + 0 基址，以及 Modicon 1 基址编号 4xxxx/3xxxx/1xxxx/0xxxx
+function parseModbusAddress(addr) {
+    if (!addr) return null;
+
+    var prefixed = addr.match(/^(HR|IR|CO|DI)(\d+)$/);
+    if (prefixed) {
+        var area = prefixed[1];
+        var offset = parseInt(prefixed[2]);
+        if (offset > 65535) return null;
+        return makeModbusResult(area, offset);
+    }
+
+    var modicon = addr.match(/^([0134])(\d{4,5})$/);
+    if (modicon) {
+        var first = modicon[1];
+        var area2 = first === '0' ? 'CO' : first === '1' ? 'DI' : first === '3' ? 'IR' : 'HR';
+        var oneBased = parseInt(modicon[2]);
+        if (oneBased <= 0) return null;
+        return makeModbusResult(area2, oneBased - 1);
+    }
+
+    return null;
+}
+
+function makeModbusResult(area, offset) {
+    return {
+        area: area,
+        dataType: (area === 'CO' || area === 'DI') ? 'Bool' : 'Word',
+        dbNumber: 0,
+        byteOffset: offset,
+        bitOffset: 0,
+        modbus: true
+    };
+}
+
+// S7 地址解析（镜像 AddressParser.cs）
+function parseS7Address(addr) {
     if (!addr) return null;
 
     // DB: DB1.DBX0.0, DB1.DBW2, DB1.DBD4, DB1.DBB0
@@ -1013,13 +1113,8 @@ document.addEventListener('DOMContentLoaded', function () {
     var btnSidebar = document.getElementById('btnSidebar');
     if (btnSidebar) btnSidebar.addEventListener('click', toggleSidebar);
 
-    // 画面组件属性栏
-    var propTag = document.getElementById('propTag');
-    if (propTag) propTag.addEventListener('change', function () { updateSelectedProp('tag', this.value); });
-    var propLabel = document.getElementById('propLabel');
-    if (propLabel) propLabel.addEventListener('input', function () { updateSelectedProp('label', this.value); });
-    var propFont = document.getElementById('propFont');
-    if (propFont) propFont.addEventListener('change', function () { updateSelectedProp('font', parseInt(this.value) || 14); });
+    // 协议相关 UI 初始化（默认 S7），并通知 C# 侧当前协议
+    onProtocolChanged();
 
     // 标签编辑弹窗：手动选择类型后不再被地址后缀覆盖；输入时即时清除错误
     var editorType = document.getElementById('editorDataType');
@@ -1131,7 +1226,9 @@ document.getElementById('aboutModal').addEventListener('click', function (e) {
 window.onScreensChanged = function (screens) {
     state.screens = (screens && Array.isArray(screens)) ? screens : [];
     state.currentScreen = state.screens.length > 0 ? 0 : -1;
-    state.selectedWidget = null;
+    state.selectedWidgets = [];
+    undoStack.length = 0;
+    redoStack.length = 0;
     renderScreens();
 };
 
@@ -1171,7 +1268,7 @@ function renderScreens() {
 function selectScreen(i) {
     if (i < 0 || i >= state.screens.length) return;
     state.currentScreen = i;
-    state.selectedWidget = null;
+    state.selectedWidgets = [];
     renderScreens();
 }
 
@@ -1179,9 +1276,10 @@ function addScreen() {
     var n = state.screens.length + 1;
     var name = '画面' + n;
     while (state.screens.some(function (s) { return s.name === name; })) n++;
+    pushUndo();
     state.screens.push({ name: name, widgets: [] });
     state.currentScreen = state.screens.length - 1;
-    state.selectedWidget = null;
+    state.selectedWidgets = [];
     renderScreens();
     scheduleSaveScreens();
 }
@@ -1210,6 +1308,7 @@ function beginRenameScreen(idx) {
         tab.classList.remove('editing');
         var name = (tab.textContent || '').replace(/\s+/g, ' ').trim();
         if (save && name && name !== screen.name) {
+            pushUndo();
             screen.name = name;
             scheduleSaveScreens();
         }
@@ -1232,20 +1331,52 @@ function deleteCurrentScreen() {
     if (state.screens.length === 0) return;
     var screen = state.screens[state.currentScreen];
     if (!screen || !confirm('确定删除画面「' + screen.name + '」？')) return;
+    pushUndo();
     state.screens.splice(state.currentScreen, 1);
     if (state.currentScreen >= state.screens.length) state.currentScreen = state.screens.length - 1;
-    state.selectedWidget = null;
+    state.selectedWidgets = [];
     renderScreens();
     scheduleSaveScreens();
 }
 
 // ── 组件 CRUD ────────────────────────────────────────────────
+// 组件类型：value 数值 / lamp 指示灯 / text 文本 / bar 棒图 / button 按钮 / rect 矩形
+// 新增字段均为可选，旧 screens.json（仅含 id/type/label/tag/x/y/w/h/font）可继续正常工作
 function defaultWidget(type, id) {
-    switch (type) {
-        case 'value': return { id: id, type: 'value', label: '', tag: '', x: 120, y: 80, w: 180, h: 64, font: 20 };
-        case 'lamp':  return { id: id, type: 'lamp',  label: '', tag: '', x: 400, y: 80, w: 56,  h: 56, font: 11 };
-        case 'text':  return { id: id, type: 'text',  label: '文本', tag: '', x: 40,  y: 20, w: 160, h: 30, font: 16 };
+    var base = { id: id, type: type, label: '', tag: '', x: 40, y: 40, w: 160, h: 48, font: 14 };
+    if (type === 'value') {
+        base.x = 120; base.y = 80; base.w = 180; base.h = 64; base.font = 20;
+    } else if (type === 'lamp') {
+        base.x = 400; base.y = 80; base.w = 64; base.h = 64; base.font = 11;
+    } else if (type === 'text') {
+        base.x = 40; base.y = 20; base.w = 160; base.h = 30; base.font = 16; base.label = '文本';
+    } else if (type === 'bar') {
+        base.x = 120; base.y = 200; base.w = 220; base.h = 28; base.font = 12;
+        base.min = 0; base.max = 100; base.barColor = '#2f6ee0';
+    } else if (type === 'button') {
+        base.x = 400; base.y = 200; base.w = 120; base.h = 40; base.font = 14;
+        base.label = '按钮'; base.action = 'toggle'; base.btnColor = '#2f6ee0';
+    } else if (type === 'rect') {
+        base.x = 40; base.y = 120; base.w = 200; base.h = 120;
+        base.bg = '#dfe6f2'; base.border = true; base.radius = 8;
     }
+    return base;
+}
+
+// 组件类型中文名
+function widgetTypeLabel(type) {
+    if (type === 'value') return '数值';
+    if (type === 'lamp') return '指示灯';
+    if (type === 'text') return '文本';
+    if (type === 'bar') return '棒图';
+    if (type === 'button') return '按钮';
+    if (type === 'rect') return '矩形';
+    return '组件';
+}
+
+// 唯一 id（时间戳 + 随机后缀，避免同一毫秒内重复）
+function newWidgetId() {
+    return 'w' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
 }
 
 function getWidget(id) {
@@ -1257,31 +1388,72 @@ function getWidget(id) {
     return null;
 }
 
+// 深拷贝一个组件对象
+function cloneWidget(w) {
+    var c = {};
+    for (var k in w) {
+        if (Object.prototype.hasOwnProperty.call(w, k)) c[k] = w[k];
+    }
+    return c;
+}
+
+// ── 选择（支持多选） ─────────────────────────────────────────
+function getSelectedWidgets() {
+    var screen = state.screens[state.currentScreen];
+    if (!screen) return [];
+    var out = [];
+    for (var i = 0; i < screen.widgets.length; i++) {
+        if (state.selectedWidgets.indexOf(screen.widgets[i].id) >= 0) out.push(screen.widgets[i]);
+    }
+    return out;
+}
+
+function setSelection(ids) {
+    state.selectedWidgets = ids || [];
+    applySelectionClass();
+    renderProps();
+}
+
+function applySelectionClass() {
+    var widgets = document.querySelectorAll('#screenCanvas .widget');
+    for (var i = 0; i < widgets.length; i++) {
+        widgets[i].classList.toggle('selected', state.selectedWidgets.indexOf(widgets[i].dataset.id) >= 0);
+    }
+}
+
+// additive=true 时加选 / 减选（Ctrl、Shift 或 Cmd 点击）
+function selectWidget(id, additive) {
+    if (!id) { setSelection([]); return; }
+    if (additive) {
+        var next = state.selectedWidgets.slice();
+        var idx = next.indexOf(id);
+        if (idx >= 0) next.splice(idx, 1); else next.push(id);
+        setSelection(next);
+    } else {
+        setSelection([id]);
+    }
+}
+
 function addWidget(type) {
     var screen = state.screens[state.currentScreen];
     if (!screen) { showToast('请先新建一个画面', 'error'); return; }
-    var w = defaultWidget(type, 'w' + Date.now().toString(36));
+    pushUndo();
+    var w = defaultWidget(type, newWidgetId());
     screen.widgets.push(w);
-    state.selectedWidget = w.id;
+    state.selectedWidgets = [w.id];
     renderScreens();
     scheduleSaveScreens();
 }
 
-function selectWidget(id) {
-    state.selectedWidget = id;
-    var widgets = document.querySelectorAll('#screenCanvas .widget');
-    for (var i = 0; i < widgets.length; i++) {
-        widgets[i].classList.toggle('selected', widgets[i].dataset.id === id);
-    }
-    renderProps();
-}
-
 function deleteSelectedWidget() {
-    if (!state.selectedWidget) return;
+    if (state.selectedWidgets.length === 0) return;
     var screen = state.screens[state.currentScreen];
     if (!screen) return;
-    screen.widgets = screen.widgets.filter(function (w) { return w.id !== state.selectedWidget; });
-    state.selectedWidget = null;
+    pushUndo();
+    screen.widgets = screen.widgets.filter(function (w) {
+        return state.selectedWidgets.indexOf(w.id) < 0;
+    });
+    state.selectedWidgets = [];
     renderScreens();
     scheduleSaveScreens();
 }
@@ -1301,19 +1473,26 @@ function renderCanvas() {
 
 function renderWidget(w) {
     var el = document.createElement('div');
-    el.className = 'widget widget-' + w.type + (state.selectedWidget === w.id ? ' selected' : '');
+    el.className = 'widget widget-' + w.type + (state.selectedWidgets.indexOf(w.id) >= 0 ? ' selected' : '');
     el.dataset.id = w.id;
     el.style.left = (w.x || 0) + 'px';
     el.style.top = (w.y || 0) + 'px';
     el.style.width = (w.w || 100) + 'px';
-    el.style.height = (w.h || 50) + 'px';
+    el.style.height = (w.h || 40) + 'px';
 
+    var handle = '<div class="widget-resize-handle"></div>';
     if (w.type === 'value') {
-        el.innerHTML = '<div class="widget-label"></div><div class="widget-value-text"></div><div class="widget-resize-handle"></div>';
+        el.innerHTML = '<div class="widget-label"></div><div class="widget-value-text"></div>' + handle;
     } else if (w.type === 'lamp') {
-        el.innerHTML = '<div class="widget-lamp-circle"></div><div class="widget-lamp-label"></div><div class="widget-resize-handle"></div>';
+        el.innerHTML = '<div class="widget-lamp-circle"></div><div class="widget-lamp-label"></div>' + handle;
     } else if (w.type === 'text') {
-        el.innerHTML = '<div class="widget-text-content"></div><div class="widget-resize-handle"></div>';
+        el.innerHTML = '<div class="widget-text-content"></div>' + handle;
+    } else if (w.type === 'bar') {
+        el.innerHTML = '<div class="widget-bar-track"><div class="widget-bar-fill"></div></div><div class="widget-bar-label"></div>' + handle;
+    } else if (w.type === 'button') {
+        el.innerHTML = '<button type="button" class="widget-button" tabindex="-1"></button>' + handle;
+    } else if (w.type === 'rect') {
+        el.innerHTML = handle;
     }
     updateWidgetDom(w, el);
     return el;
@@ -1332,14 +1511,18 @@ function updateWidgetDom(w, el) {
 
     var tagIdx = findTagIndex(w.tag);
     var tag = tagIdx >= 0 ? state.tags[tagIdx] : null;
+    var quality = tag ? tag.quality : 'Unknown';
+    var hasValue = !!tag && quality === 'Good' && tag.value !== null && tag.value !== undefined;
+
+    // 通用样式（背景 / 边框 / 圆角 / 对齐 / 文字色 / 加粗）
+    applyWidgetStyle(w, el);
 
     if (w.type === 'value') {
         var labelEl = el.querySelector('.widget-label');
         if (labelEl) labelEl.textContent = w.label || (tag ? tag.name : '未绑定');
         var valEl = el.querySelector('.widget-value-text');
         if (valEl) {
-            var quality = tag ? tag.quality : 'Unknown';
-            valEl.textContent = formatValue(tag ? tag.value : null, quality);
+            valEl.textContent = formatWidgetValue(w, tag ? tag.value : null, quality);
             valEl.className = 'widget-value-text ' +
                 (quality === 'Bad' ? 'bad' : quality === 'Unknown' ? 'unknown' : '');
             valEl.style.fontSize = (w.font || 20) + 'px';
@@ -1348,13 +1531,23 @@ function updateWidgetDom(w, el) {
         var circ = el.querySelector('.widget-lamp-circle');
         if (circ) {
             circ.className = 'widget-lamp-circle';
-            if (tag && tag.quality === 'Good' && typeof tag.value === 'boolean') {
+            circ.style.background = '';
+            circ.style.boxShadow = '';
+            if (hasValue && typeof tag.value === 'boolean') {
                 circ.classList.add(tag.value ? 'on' : 'off');
+                if (w.onColor) {
+                    circ.style.background = tag.value ? w.onColor : '';
+                    circ.style.boxShadow = tag.value ? ('0 0 0 6px ' + hexToRgba(w.onColor, 0.18)) : '';
+                }
             }
         }
         var lbl = el.querySelector('.widget-lamp-label');
         if (lbl) {
-            lbl.textContent = w.label || (tag ? tag.name : '未绑定');
+            var lampText = w.label || (tag ? tag.name : '未绑定');
+            if (hasValue && typeof tag.value === 'boolean') {
+                lampText = tag.value ? (w.boolTrue || lampText) : (w.boolFalse || lampText);
+            }
+            lbl.textContent = lampText;
             lbl.style.fontSize = (w.font || 11) + 'px';
         }
     } else if (w.type === 'text') {
@@ -1363,6 +1556,64 @@ function updateWidgetDom(w, el) {
             tc.textContent = w.label || '';
             tc.style.fontSize = (w.font || 16) + 'px';
         }
+    } else if (w.type === 'bar') {
+        var fill = el.querySelector('.widget-bar-fill');
+        var barLabel = el.querySelector('.widget-bar-label');
+        var min = (w.min === '' || w.min === null || w.min === undefined) ? 0 : Number(w.min);
+        var max = (w.max === '' || w.max === null || w.max === undefined) ? 100 : Number(w.max);
+        var pct = 0;
+        if (hasValue && typeof tag.value === 'number') {
+            var span = (max - min) || 1;
+            pct = Math.max(0, Math.min(100, (tag.value - min) / span * 100));
+        }
+        if (fill) {
+            fill.style.width = pct.toFixed(1) + '%';
+            fill.style.background = w.barColor || '';
+        }
+        if (barLabel) {
+            barLabel.textContent = formatWidgetValue(w, tag ? tag.value : null, quality);
+            barLabel.style.fontSize = (w.font || 12) + 'px';
+        }
+    } else if (w.type === 'button') {
+        var btn = el.querySelector('.widget-button');
+        if (btn) {
+            btn.textContent = w.label || (tag ? tag.name : '按钮');
+            btn.style.fontSize = (w.font || 14) + 'px';
+            btn.style.background = w.btnColor || '';
+        }
+        el.classList.toggle('widget-button-on', hasValue && (tag.value === true || tag.value === 1));
+    }
+}
+
+// 组件数值格式化（支持小数位与单位后缀）
+function formatWidgetValue(w, value, quality) {
+    if (quality === 'Unknown' || value === null || value === undefined) return '---';
+    if (typeof value === 'boolean') return value ? 'TRUE' : 'FALSE';
+    if (typeof value === 'number') {
+        var d = (w.decimals === '' || w.decimals === null || w.decimals === undefined) ? null : Number(w.decimals);
+        var text = d === null ? formatValue(value, quality) : value.toFixed(d);
+        if (w.unit) text += ' ' + w.unit;
+        return text;
+    }
+    return String(value);
+}
+
+// 通用样式（背景 / 边框 / 圆角 / 对齐 / 文字色 / 加粗）
+function applyWidgetStyle(w, el) {
+    el.style.background = w.bg ? w.bg : '';
+    if (w.border === true) el.style.border = '1px solid ' + (w.borderColor || 'var(--border-strong)');
+    else if (w.border === false) el.style.border = 'none';
+    else el.style.border = '';
+    el.style.borderRadius = (w.radius === '' || w.radius === null || w.radius === undefined) ? '' : (Number(w.radius) + 'px');
+    // 对齐：纵向布局组件（数值 / 指示灯）用 align-items，横向布局（文本）用 justify-content
+    var alignVal = w.align === 'left' ? 'flex-start' : w.align === 'right' ? 'flex-end' : (w.align === 'center' ? 'center' : '');
+    el.style.justifyContent = (w.type === 'text' && alignVal) ? alignVal : '';
+    el.style.alignItems = ((w.type === 'value' || w.type === 'lamp') && alignVal) ? alignVal : '';
+
+    var inner = el.querySelectorAll('.widget-label, .widget-value-text, .widget-lamp-label, .widget-text-content, .widget-bar-label, .widget-button');
+    for (var i = 0; i < inner.length; i++) {
+        inner[i].style.color = w.color ? w.color : '';
+        inner[i].style.fontWeight = w.bold ? '700' : '';
     }
 }
 
@@ -1376,99 +1627,537 @@ function updateScreenWidgets() {
     }
 }
 
-// ── 属性栏 ───────────────────────────────────────────────────
+// ── 属性栏（按组件类型动态渲染） ─────────────────────────────
+
+// 多选时：属性取值一致返回该值，否则返回 null（表示"多个值"）
+function commonValue(list, key) {
+    if (list.length === 0) return null;
+    for (var i = 1; i < list.length; i++) {
+        if (list[i][key] !== list[0][key]) return null;
+    }
+    return list[0][key];
+}
+
+function propField(label, inner, small) {
+    return '<div class="prop-field' + (small ? ' prop-field-sm' : '') + '">' +
+        '<label class="field-label">' + esc(label) + '</label>' + inner + '</div>';
+}
+function propNum(key, label, val, min, max, ph) {
+    return propField(label, '<input type="number" class="field-input" data-prop="' + key + '"' +
+        (min === null ? '' : ' min="' + min + '"') +
+        (max === null ? '' : ' max="' + max + '"') +
+        ' placeholder="' + esc(ph || '') + '"' +
+        ' value="' + esc(val === null || val === undefined ? '' : String(val)) + '">', true);
+}
+function propText(key, label, val, ph) {
+    return propField(label, '<input type="text" class="field-input" data-prop="' + key + '"' +
+        ' value="' + esc(val === null || val === undefined ? '' : val) + '"' +
+        ' placeholder="' + esc(ph || '') + '" spellcheck="false" autocomplete="off">');
+}
+function propColor(key, label, val) {
+    return propField(label, '<span class="prop-color-wrap">' +
+        '<input type="color" class="field-input prop-color" data-prop="' + key + '" value="' + esc(val || '#000000') + '">' +
+        '<button type="button" class="prop-clear" data-clear="' + key + '" title="恢复默认">×</button>' +
+        '</span>', true);
+}
+function propCheck(key, label, val) {
+    return propField(label, '<label class="check-label">' +
+        '<input type="checkbox" data-prop="' + key + '"' + (val ? ' checked' : '') + '>' +
+        '<span class="check-box"></span></label>', true);
+}
+function propSelect(key, label, val, options) {
+    var html = '<select class="field-input" data-prop="' + key + '">';
+    for (var i = 0; i < options.length; i++) {
+        html += '<option value="' + options[i].v + '"' + (String(val) === options[i].v ? ' selected' : '') + '>' +
+            esc(options[i].t) + '</option>';
+    }
+    return propField(label, html + '</select>');
+}
+function alignOptions() {
+    return [{ v: '', t: '默认' }, { v: 'left', t: '左' }, { v: 'center', t: '居中' }, { v: 'right', t: '右' }];
+}
+function tagOptions(current) {
+    var html = '<option value=""' + (current ? '' : ' selected') + '>未绑定</option>';
+    for (var i = 0; i < state.tags.length; i++) {
+        var name = state.tags[i].name;
+        html += '<option value="' + esc(name) + '"' + (name === current ? ' selected' : '') + '>' + esc(name) + '</option>';
+    }
+    return html;
+}
+
+// 对齐 / 层级按钮的可用状态（需选中 2 个以上组件才能对齐）
+function updateEditButtons(count) {
+    var alignBtns = document.querySelectorAll('#screenToolbar [data-align]');
+    for (var i = 0; i < alignBtns.length; i++) alignBtns[i].disabled = count < 2;
+    var zBtns = document.querySelectorAll('#screenToolbar [data-z]');
+    for (var j = 0; j < zBtns.length; j++) zBtns[j].disabled = count === 0;
+}
+
 function renderProps() {
     var el = document.getElementById('widgetProps');
     var btnDel = document.getElementById('btnDeleteWidget');
-    var w = state.selectedWidget ? getWidget(state.selectedWidget) : null;
-    if (!w) {
+    var sel = getSelectedWidgets();
+
+    updateEditButtons(sel.length);
+
+    if (sel.length === 0) {
         el.style.display = 'none';
-        btnDel.disabled = true;
+        if (btnDel) btnDel.disabled = true;
         return;
     }
     el.style.display = 'flex';
-    btnDel.disabled = false;
+    if (btnDel) btnDel.disabled = false;
 
-    var sel = document.getElementById('propTag');
-    var html = '<option value="">未绑定</option>';
-    for (var i = 0; i < state.tags.length; i++) {
-        var selAttr = w.tag === state.tags[i].name ? ' selected' : '';
-        html += '<option value="' + esc(state.tags[i].name) + '"' + selAttr + '>' + esc(state.tags[i].name) + '</option>';
+    var html = '';
+
+    // 多选：只提供可批量应用的通用样式
+    if (sel.length > 1) {
+        var cAlign = commonValue(sel, 'align');
+        html += '<span class="widget-props-title">已选 ' + sel.length + ' 个组件</span>';
+        html += propColor('color', '文字色', commonValue(sel, 'color'));
+        html += propColor('bg', '背景色', commonValue(sel, 'bg'));
+        html += propNum('font', '字号', commonValue(sel, 'font'), 8, 96, '');
+        html += propSelect('align', '对齐', cAlign === null ? '' : cAlign, alignOptions());
+        html += propCheck('bold', '加粗', commonValue(sel, 'bold') === true);
+        el.innerHTML = html;
+        bindProps(el);
+        return;
     }
-    sel.innerHTML = html;
 
-    document.getElementById('propLabel').value = w.label || '';
-    document.getElementById('propFont').value = w.font || defaultFont(w.type);
+    var w = sel[0];
+    html += '<span class="widget-props-title">' + widgetTypeLabel(w.type) + '</span>';
+    html += propNum('x', 'X', w.x, 0, null, '');
+    html += propNum('y', 'Y', w.y, 0, null, '');
+    html += propNum('w', '宽', w.w, 20, null, '');
+    html += propNum('h', '高', w.h, 20, null, '');
+    html += propNum('font', '字号', w.font, 8, 96, '');
+    html += propColor('color', '文字色', w.color);
+    html += propColor('bg', '背景色', w.bg);
+    html += propSelect('align', '对齐', w.align || '', alignOptions());
+    html += propCheck('bold', '加粗', w.bold === true);
+    html += propCheck('border', '边框', w.border === true);
+
+    // 按类型显示相关字段，隐藏无关项
+    if (w.type === 'value' || w.type === 'lamp' || w.type === 'bar' || w.type === 'button') {
+        html += propField('绑定标签', '<select class="field-input" data-prop="tag">' + tagOptions(w.tag) + '</select>');
+    }
+    if (w.type === 'value') {
+        html += propText('label', '显示文字', w.label, '留空则显示标签名');
+        html += propText('unit', '单位', w.unit, '如 ℃ / rpm');
+        html += propNum('decimals', '小数位', w.decimals, 0, 6, '');
+    } else if (w.type === 'lamp') {
+        html += propText('label', '显示文字', w.label, '留空则显示标签名');
+        html += propText('boolTrue', 'ON 文字', w.boolTrue, '留空用显示文字');
+        html += propText('boolFalse', 'OFF 文字', w.boolFalse, '留空用显示文字');
+        html += propColor('onColor', 'ON 颜色', w.onColor);
+    } else if (w.type === 'text') {
+        html += propText('label', '内容', w.label, '输入文本内容');
+    } else if (w.type === 'bar') {
+        html += propText('label', '标签', w.label, '可留空');
+        html += propNum('min', '最小值', w.min, null, null, '0');
+        html += propNum('max', '最大值', w.max, null, null, '100');
+        html += propNum('decimals', '小数位', w.decimals, 0, 6, '');
+        html += propColor('barColor', '填充色', w.barColor);
+    } else if (w.type === 'button') {
+        html += propText('label', '按钮文字', w.label, '留空则显示标签名');
+        html += propSelect('action', '动作', w.action || 'toggle', [
+            { v: 'toggle', t: '取反' }, { v: 'set', t: '置位' }, { v: 'clear', t: '复位' }
+        ]);
+        html += propColor('btnColor', '按钮色', w.btnColor);
+    } else if (w.type === 'rect') {
+        html += propNum('radius', '圆角', w.radius, 0, 60, '0');
+        html += propColor('borderColor', '边框色', w.borderColor);
+    }
+
+    el.innerHTML = html;
+    bindProps(el);
 }
 
-// 各组件默认字号（与 defaultWidget 保持一致）
-function defaultFont(type) {
-    if (type === 'value') return 20;
-    if (type === 'lamp') return 11;
-    return 16;
+// 绑定属性栏事件（面板每次重建后重新绑定）
+function bindProps(container) {
+    var inputs = container.querySelectorAll('[data-prop]');
+    for (var i = 0; i < inputs.length; i++) {
+        inputs[i].addEventListener('change', onPropChange);
+    }
+    var clears = container.querySelectorAll('[data-clear]');
+    for (var j = 0; j < clears.length; j++) {
+        clears[j].addEventListener('click', onPropClear);
+    }
 }
 
-function updateSelectedProp(key, value) {
-    var w = state.selectedWidget ? getWidget(state.selectedWidget) : null;
-    if (!w) return;
-    w[key] = value;
-    var el = document.querySelector('#screenCanvas .widget[data-id="' + w.id + '"]');
-    if (el) updateWidgetDom(w, el);
+function onPropChange() {
+    var key = this.dataset.prop;
+    if (!key) return;
+    var value;
+    if (this.type === 'checkbox') value = this.checked;
+    else if (this.type === 'number') value = this.value === '' ? '' : Number(this.value);
+    else value = this.value;
+
+    pushUndo();
+    var sel = getSelectedWidgets();
+    for (var i = 0; i < sel.length; i++) {
+        sel[i][key] = value;
+        clampWidget(sel[i]);
+    }
+    refreshSelectedWidgets();
     scheduleSaveScreens();
 }
 
-// ── 拖拽移动 / 缩放 ──────────────────────────────────────────
+function onPropClear() {
+    var key = this.dataset.clear;
+    if (!key) return;
+    pushUndo();
+    var sel = getSelectedWidgets();
+    for (var i = 0; i < sel.length; i++) sel[i][key] = '';
+    refreshSelectedWidgets();
+    renderProps();
+    scheduleSaveScreens();
+}
+
+// 限制组件几何在合理范围内
+function clampWidget(w) {
+    w.x = Math.max(0, Number(w.x) || 0);
+    w.y = Math.max(0, Number(w.y) || 0);
+    w.w = Math.max(20, Number(w.w) || 20);
+    w.h = Math.max(20, Number(w.h) || 20);
+}
+
+// 只刷新选中组件的画布 DOM（不重建属性栏，避免输入框失焦）
+function refreshSelectedWidgets() {
+    var canvas = document.getElementById('screenCanvas');
+    var sel = getSelectedWidgets();
+    for (var i = 0; i < sel.length; i++) {
+        var el = canvas.querySelector('.widget[data-id="' + sel[i].id + '"]');
+        if (!el) continue;
+        el.style.left = (sel[i].x || 0) + 'px';
+        el.style.top = (sel[i].y || 0) + 'px';
+        el.style.width = (sel[i].w || 100) + 'px';
+        el.style.height = (sel[i].h || 40) + 'px';
+        updateWidgetDom(sel[i], el);
+    }
+}
+
+// ── 拖拽移动 / 缩放 / 多选 / 预览 ────────────────────────────
 var dragState = null;
+
+// 按网格吸附（10px）
+function snapVal(v) {
+    return state.snap ? Math.round(v / 10) * 10 : Math.round(v);
+}
 
 (function setupCanvasInteractions() {
     var canvas = document.getElementById('screenCanvas');
+
     canvas.addEventListener('mousedown', function (e) {
+        if (state.preview) return;                       // 预览模式不进入编辑
         var wEl = e.target.closest('.widget');
-        if (!wEl) { selectWidget(null); return; }
-        var handle = e.target.closest('.widget-resize-handle');
+        var additive = e.ctrlKey || e.metaKey || e.shiftKey;
+        if (!wEl) { setSelection([]); return; }
+
         var id = wEl.dataset.id;
-        selectWidget(id);
+        var handle = e.target.closest('.widget-resize-handle');
+        selectWidget(id, additive);
+        if (additive) return;                            // 加选时不启动拖动
+
         var w = getWidget(id);
         if (!w) return;
         e.preventDefault();
         dragState = {
-            id: id,
+            mode: handle ? 'resize' : 'move',
             startX: e.clientX,
             startY: e.clientY,
-            origX: w.x, origY: w.y, origW: w.w, origH: w.h,
-            mode: handle ? 'resize' : 'move'
+            before: snapshotScreens(),
+            // 记录全部选中组件的起始几何，实现整体移动 / 缩放
+            items: getSelectedWidgets().map(function (it) {
+                return { id: it.id, x: it.x, y: it.y, w: it.w, h: it.h };
+            })
         };
     });
 
     document.addEventListener('mousemove', function (e) {
         if (!dragState) return;
-        var w = getWidget(dragState.id);
-        if (!w) { dragState = null; return; }
         var dx = e.clientX - dragState.startX;
         var dy = e.clientY - dragState.startY;
-        if (dragState.mode === 'move') {
-            w.x = Math.max(0, Math.round(dragState.origX + dx));
-            w.y = Math.max(0, Math.round(dragState.origY + dy));
-        } else {
-            w.w = Math.max(40, Math.round(dragState.origW + dx));
-            w.h = Math.max(24, Math.round(dragState.origH + dy));
-        }
-        var el = canvas.querySelector('.widget[data-id="' + dragState.id + '"]');
-        if (el) {
-            el.style.left = w.x + 'px';
-            el.style.top = w.y + 'px';
-            el.style.width = w.w + 'px';
-            el.style.height = w.h + 'px';
+        for (var i = 0; i < dragState.items.length; i++) {
+            var it = dragState.items[i];
+            var w = getWidget(it.id);
+            if (!w) continue;
+            if (dragState.mode === 'move') {
+                w.x = Math.max(0, snapVal(it.x + dx));
+                w.y = Math.max(0, snapVal(it.y + dy));
+            } else {
+                w.w = Math.max(20, snapVal(it.w + dx));
+                w.h = Math.max(20, snapVal(it.h + dy));
+            }
+            var el = canvas.querySelector('.widget[data-id="' + it.id + '"]');
+            if (el) {
+                el.style.left = w.x + 'px';
+                el.style.top = w.y + 'px';
+                el.style.width = w.w + 'px';
+                el.style.height = w.h + 'px';
+            }
         }
     });
 
     document.addEventListener('mouseup', function () {
-        if (dragState) {
-            dragState = null;
+        if (!dragState) return;
+        // 仅在实际发生位移 / 缩放时记录一次撤销点
+        if (snapshotScreens() !== dragState.before) {
+            undoStack.push(dragState.before);
+            if (undoStack.length > undoLimit) undoStack.shift();
+            redoStack.length = 0;
             scheduleSaveScreens();
         }
+        dragState = null;
+        refreshSelectedWidgets();
+        renderProps();
     });
+
+    // 预览模式下点击按钮组件执行写值
+    canvas.addEventListener('click', function (e) {
+        if (!state.preview) return;
+        var btnEl = e.target.closest('.widget-button');
+        if (!btnEl) return;
+        var wEl = btnEl.closest('.widget');
+        if (!wEl) return;
+        var w = getWidget(wEl.dataset.id);
+        if (w) runWidgetButton(w);
+    });
+
+    // 初始 UI 状态（网格 / 吸附默认开启）
+    canvas.classList.toggle('no-grid', !state.showGrid);
 })();
+
+// ── 按钮组件写值（预览模式） ─────────────────────────────────
+function runWidgetButton(w) {
+    var idx = findTagIndex(w.tag);
+    if (idx < 0) { showToast('该按钮未绑定标签', 'error'); return; }
+    if (!state.connected) { showToast('PLC 未连接，无法写入。请先连接。', 'error'); return; }
+
+    var tag = state.tags[idx];
+    var action = w.action || 'toggle';
+    var value;
+    if (tag.dataType === 'Bool') {
+        if (action === 'set') value = true;
+        else if (action === 'clear') value = false;
+        else value = !(tag.value === true);
+    } else {
+        if (action === 'set') value = 1;
+        else if (action === 'clear') value = 0;
+        else value = (typeof tag.value === 'number' ? tag.value + 1 : 1);
+    }
+    postToCSharp({ action: 'writeValue', index: idx, value: value });
+}
+
+// ── 网格 / 吸附 / 预览开关 ───────────────────────────────────
+function toggleGrid() {
+    state.showGrid = !state.showGrid;
+    document.getElementById('screenCanvas').classList.toggle('no-grid', !state.showGrid);
+    var btn = document.getElementById('btnGrid');
+    if (btn) btn.classList.toggle('active', state.showGrid);
+}
+
+function toggleSnap() {
+    state.snap = !state.snap;
+    var btn = document.getElementById('btnSnap');
+    if (btn) btn.classList.toggle('active', state.snap);
+}
+
+function togglePreview() {
+    state.preview = !state.preview;
+    document.getElementById('screenCanvas').classList.toggle('preview', state.preview);
+    var btn = document.getElementById('btnPreview');
+    if (btn) {
+        btn.classList.toggle('active', state.preview);
+        btn.textContent = state.preview ? '退出预览' : '预览';
+    }
+    if (state.preview) setSelection([]);
+    renderProps();
+}
+
+// ── 对齐 / 层级 ──────────────────────────────────────────────
+function alignWidgets(mode) {
+    var sel = getSelectedWidgets();
+    if (sel.length < 2) return;
+    pushUndo();
+    var lefts = [], rights = [], tops = [], bottoms = [];
+    for (var i = 0; i < sel.length; i++) {
+        lefts.push(sel[i].x);
+        rights.push(sel[i].x + sel[i].w);
+        tops.push(sel[i].y);
+        bottoms.push(sel[i].y + sel[i].h);
+    }
+    var minL = Math.min.apply(null, lefts), maxR = Math.max.apply(null, rights);
+    var minT = Math.min.apply(null, tops), maxB = Math.max.apply(null, bottoms);
+    for (var j = 0; j < sel.length; j++) {
+        var w = sel[j];
+        if (mode === 'left') w.x = minL;
+        else if (mode === 'right') w.x = maxR - w.w;
+        else if (mode === 'top') w.y = minT;
+        else if (mode === 'bottom') w.y = maxB - w.h;
+        else if (mode === 'hcenter') w.x = Math.round((minL + maxR) / 2 - w.w / 2);
+        else if (mode === 'vcenter') w.y = Math.round((minT + maxB) / 2 - w.h / 2);
+        clampWidget(w);
+    }
+    renderScreens();
+    scheduleSaveScreens();
+}
+
+function bringToFront() { reorderSelection(true); }
+function sendToBack() { reorderSelection(false); }
+
+// 调整选中组件在 widgets 数组中的顺序（数组顺序 = 绘制层级）
+function reorderSelection(toFront) {
+    var screen = state.screens[state.currentScreen];
+    if (!screen || state.selectedWidgets.length === 0) return;
+    pushUndo();
+    var picked = [], rest = [];
+    for (var i = 0; i < screen.widgets.length; i++) {
+        if (state.selectedWidgets.indexOf(screen.widgets[i].id) >= 0) picked.push(screen.widgets[i]);
+        else rest.push(screen.widgets[i]);
+    }
+    screen.widgets = toFront ? rest.concat(picked) : picked.concat(rest);
+    renderScreens();
+    scheduleSaveScreens();
+}
+
+// ── 复制 / 粘贴 / 撤销 / 重做 ────────────────────────────────
+var undoStack = [];
+var redoStack = [];
+var undoLimit = 50;
+
+function snapshotScreens() { return JSON.stringify(state.screens); }
+
+function pushUndo() {
+    undoStack.push(snapshotScreens());
+    if (undoStack.length > undoLimit) undoStack.shift();
+    redoStack.length = 0;
+}
+
+function undo() {
+    if (undoStack.length === 0) return;
+    redoStack.push(snapshotScreens());
+    state.screens = JSON.parse(undoStack.pop());
+    afterHistory();
+}
+
+function redo() {
+    if (redoStack.length === 0) return;
+    undoStack.push(snapshotScreens());
+    state.screens = JSON.parse(redoStack.pop());
+    afterHistory();
+}
+
+function afterHistory() {
+    if (state.currentScreen >= state.screens.length) state.currentScreen = state.screens.length - 1;
+    if (state.currentScreen < 0 && state.screens.length > 0) state.currentScreen = 0;
+    var screen = state.screens[state.currentScreen];
+    if (screen) {
+        state.selectedWidgets = state.selectedWidgets.filter(function (id) {
+            return screen.widgets.some(function (w) { return w.id === id; });
+        });
+    } else {
+        state.selectedWidgets = [];
+    }
+    renderScreens();
+    scheduleSaveScreens();
+}
+
+function copySelection() {
+    var sel = getSelectedWidgets();
+    if (sel.length === 0) return;
+    state.clipboard = sel.map(cloneWidget);
+    showToast('已复制 ' + sel.length + ' 个组件');
+}
+
+function pasteClipboard() {
+    var screen = state.screens[state.currentScreen];
+    if (!screen || !state.clipboard || state.clipboard.length === 0) return;
+    pushUndo();
+    var ids = [];
+    for (var i = 0; i < state.clipboard.length; i++) {
+        var c = cloneWidget(state.clipboard[i]);
+        c.id = newWidgetId();
+        c.x = (Number(c.x) || 0) + 10;
+        c.y = (Number(c.y) || 0) + 10;
+        screen.widgets.push(c);
+        ids.push(c.id);
+    }
+    // 连续粘贴时继续偏移，避免叠在一起
+    state.clipboard = state.clipboard.map(function (item) {
+        var c = cloneWidget(item);
+        c.x = (Number(c.x) || 0) + 10;
+        c.y = (Number(c.y) || 0) + 10;
+        return c;
+    });
+    setSelection(ids);
+    renderScreens();
+    scheduleSaveScreens();
+}
+
+function duplicateSelection() {
+    var sel = getSelectedWidgets();
+    var screen = state.screens[state.currentScreen];
+    if (!screen || sel.length === 0) return;
+    pushUndo();
+    var ids = [];
+    for (var i = 0; i < sel.length; i++) {
+        var c = cloneWidget(sel[i]);
+        c.id = newWidgetId();
+        c.x = (Number(c.x) || 0) + 10;
+        c.y = (Number(c.y) || 0) + 10;
+        screen.widgets.push(c);
+        ids.push(c.id);
+    }
+    setSelection(ids);
+    renderScreens();
+    scheduleSaveScreens();
+}
+
+// ── 组件编辑快捷键（仅画面视图、且焦点不在输入控件时生效） ────
+document.addEventListener('keydown', function (e) {
+    if (state.view !== 'screens') return;
+    var t = e.target;
+    var typing = t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA' || t.isContentEditable);
+    if (typing) return;
+
+    var ctrl = e.ctrlKey || e.metaKey;
+    var key = (e.key || '').toLowerCase();
+
+    if (ctrl && key === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); return; }
+    if (ctrl && key === 'y') { e.preventDefault(); redo(); return; }
+    if (ctrl && key === 'd') { e.preventDefault(); duplicateSelection(); return; }
+    if (ctrl && key === 'c') {
+        // 页面上有文本选中时不劫持系统复制
+        var selText = window.getSelection ? String(window.getSelection()) : '';
+        if (!selText) copySelection();
+        return;
+    }
+    if (ctrl && key === 'v') { e.preventDefault(); pasteClipboard(); return; }
+    if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelectedWidget(); return; }
+    if (e.key === 'Escape') { setSelection([]); return; }
+
+    if (state.selectedWidgets.length > 0) {
+        var step = e.shiftKey ? 10 : 1;
+        var dx = 0, dy = 0;
+        if (e.key === 'ArrowLeft') dx = -step;
+        else if (e.key === 'ArrowRight') dx = step;
+        else if (e.key === 'ArrowUp') dy = -step;
+        else if (e.key === 'ArrowDown') dy = step;
+        if (dx !== 0 || dy !== 0) {
+            e.preventDefault();
+            pushUndo();
+            var list = getSelectedWidgets();
+            for (var i = 0; i < list.length; i++) {
+                list[i].x = Math.max(0, list[i].x + dx);
+                list[i].y = Math.max(0, list[i].y + dy);
+            }
+            refreshSelectedWidgets();
+            renderProps();
+            scheduleSaveScreens();
+        }
+    }
+});
 
 // ── 自动保存（防抖） ─────────────────────────────────────────
 var saveScreensTimer = null;
@@ -1489,8 +2178,14 @@ function esc(str) {
 }
 
 function hexToRgba(hex, alpha) {
-    var r = parseInt(hex.slice(1, 3), 16);
-    var g = parseInt(hex.slice(3, 5), 16);
-    var b = parseInt(hex.slice(5, 7), 16);
+    if (!hex) return 'transparent';
+    var h = hex.replace('#', '');
+    // 兼容 3 位简写（如 #abc），其余非法值原样返回，避免拼出 rgba(…,NaN,…) 无效色
+    if (h.length === 3) h = h.charAt(0) + h.charAt(0) + h.charAt(1) + h.charAt(1) + h.charAt(2) + h.charAt(2);
+    if (h.length !== 6) return hex;
+    var r = parseInt(h.slice(0, 2), 16);
+    var g = parseInt(h.slice(2, 4), 16);
+    var b = parseInt(h.slice(4, 6), 16);
+    if (isNaN(r) || isNaN(g) || isNaN(b)) return hex;
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
 }

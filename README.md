@@ -1,21 +1,21 @@
-# Pulse S7 监控台
+# Pulse
 
-<img src="S7Scada/Assets/AppIcon.png" width="88" alt="Pulse S7 监控台 图标">
+<img src="S7Scada/Assets/AppIcon.png" width="88" alt="Pulse 图标">
 
-**Pulse（脉动）** —— 基于 **C# WinUI 3 + WebView2** 的西门子 S7 上位机监控软件，用于 PLC 标签的实时监控、数据查看与画面组态。
+**Pulse（脉动）** —— 基于 **C# WinUI 3 + WebView2** 的工业上位机监控软件，用于 PLC 标签的实时监控、数据查看与画面组态。支持 **西门子 S7** 与 **Modbus TCP** 两种通信协议。
 
 > 名字取意"脉动"：PLC 的扫描周期就是这套系统的脉搏，每一次刷新都是一次心跳。
 > 图标：圆角蓝渐变 + 白色扫描波形（就是那条脉搏）+ 右上绿色指示灯（运行状态），与软件内的状态 LED 同一套视觉语言。
 
-前端使用 HTML/CSS/JS 构建界面，通过 WebView2 承载，通信层使用 **S7netplus** 与西门子 S7-1200/1500/300/400 通信。
+前端使用 HTML/CSS/JS 构建界面，通过 WebView2 承载；通信层抽象出 `IPlcDriver` 接口，内置两个驱动：**S7netplus**（西门子 S7-1200/1500/300/400）与 **NModbus**（Modbus TCP，通用）。
 
 ## ✨ 功能特性
 
-- **S7 通信**
-  - 支持 S7-1200 / 1500 / 300 / 400（可切换 CPU 型号）
-  - 地址区：DB、M、I、Q、T、C
-  - 地址解析：`DB1.DBW2`、`M0.0`、`DB1.DBD4` 等格式
-  - 批量按区读取、断线检测、读写超时保护（5s）
+- **多协议通信**
+  - **S7（西门子）**：S7-1200 / 1500 / 300 / 400（可切换 CPU 型号）；地址区 DB、M、I、Q、T、C；地址格式 `DB1.DBW2`、`M0.0`、`DB1.DBD4`
+  - **Modbus TCP（通用）**：4 个标准寄存器区（保持寄存器 / 输入寄存器 / 线圈 / 离散输入）；地址格式 `HR100` / `IR0` / `CO5` / `DI3`，也支持 Modicon 编号 `40001` / `30001` / `10001` / `00001`
+  - 批量按区读取、区间合并分块（不跨读无关区间）、断线检测、读写超时保护（5s）
+  - 协议层抽象为 `IPlcDriver`，新增协议不影响既有驱动
 - **标签管理**
   - 增删改、启停单个标签扫描、分组
   - 配置保存/加载（`s7_tags.json`），含预置示例标签
@@ -25,9 +25,10 @@
   - 扫描间隔可调（默认 100ms），支持手动立即刷新
   - 连接状态反馈（连接中/失败原因/超时）
 - **画面编辑器（HMI 组态）**
-  - 多画面自由添加/切换/重命名/删除
-  - 组件：数值显示、指示灯、文本
-  - 画布上自由拖拽摆放、缩放
+  - 多画面自由添加 / 切换 / 重命名 / 删除
+  - 组件 **6 种**：数值、指示灯、文本、棒图、按钮（预览时可写值）、矩形
+  - 属性栏按组件类型动态显示：绑定标签、字号、文字色 / 背景色、对齐、加粗、边框；数值支持单位与小数位，指示灯支持 ON/OFF 文字与颜色，棒图支持量程与配色
+  - 编辑体验：10px 网格吸附、多选、六向对齐、置顶 / 置底、复制粘贴、方向键微移、撤销重做、预览模式
   - 组件绑定标签后实时刷新，布局自动保存（`screens.json`）
 - **界面**
   - 明/暗主题切换，标题栏随主题配色
@@ -44,42 +45,50 @@
 ## 🚀 快速开始
 
 ### 方式一：直接下载（推荐）
-从 [Releases](https://github.com/xukuncai-hub/s7-scada/releases) 下载 `S7Scada-win-x64.zip`，解压后双击 `S7Scada.exe` 即可运行。
+从 [Releases](https://github.com/xukuncai-hub/s7-scada/releases) 下载 `Pulse-win-x64.zip`，解压后双击 `Pulse.exe` 即可运行。
 
 ### 方式二：源码构建
 ```bash
 # 需要 .NET SDK 10 + Windows
 dotnet build S7Scada/S7Scada.csproj -c Release
 # 运行
-./S7Scada/bin/Release/net10.0-windows10.0.19041.0/win-x64/S7Scada.exe
+./S7Scada/bin/Release/net10.0-windows10.0.19041.0/win-x64/Pulse.exe
 ```
 
 ### 发布分发包（WinUI 3 自包含，文件夹部署）
 ```bash
 dotnet publish S7Scada/S7Scada.csproj -c Release -o publish
 ```
-产物：`publish/` 目录（自包含 .NET + Windows App SDK 运行时，无需在目标机安装任何运行时），其中 `publish/S7Scada.exe` 与 `publish/wwwroot/`（前端资源，必须与 exe 同目录）。整个目录拷到目标机器即可运行。
+产物：`publish/` 目录（自包含 .NET + Windows App SDK 运行时，无需在目标机安装任何运行时），其中 `publish/Pulse.exe` 与 `publish/wwwroot/`（前端资源，必须与 exe 同目录）。整个目录拷到目标机器即可运行。
 
 ## 🖥️ 使用说明
 
-### 1. 连接 PLC
-1. 左侧填 **IP 地址**（如 `192.168.0.1`），选择 **CPU 型号**
-2. 机架 0 / 插槽 1（S7-1200/1500 默认），扫描周期默认 100ms（连接后修改立即生效）
-3. 点击 **连接 PLC**。连接失败会提示原因，手动重试即可
+### 1. 连接设备
+1. 选择 **通信协议**：`S7（西门子）` 或 `Modbus TCP（通用）`
+2. 填 **IP 地址**（如 `192.168.0.1`）
+3. **S7**：选择 CPU 型号，机架 0 / 插槽 1（1200/1500 默认）
+   **Modbus**：填端口（默认 502）与从站号（Unit ID，默认 1）
+4. 扫描周期默认 100ms（连接后修改立即生效）
+5. 点击 **连接**。连接失败会提示原因，手动重试即可
 
-> **TIA 工程要求**：DB 需关闭"优化的块访问"；PLC 需开启 PUT/GET 通信。
+> **TIA 工程要求（仅 S7）**：DB 需关闭"优化的块访问"；PLC 需开启 PUT/GET 通信。
 
 ### 2. 添加标签
-- 工具栏 **添加标签**，填写名称 + 地址（如 `DB1.DBW2`），地址自动解析
+- 工具栏 **添加标签**，填写名称 + 地址，地址自动解析（解析器随所选协议切换）
+  - S7：`DB1.DBW2`、`M0.0`、`DB1.DBD4`
+  - Modbus：`HR100`（保持寄存器）、`IR0`（输入寄存器）、`CO5`（线圈）、`DI3`（离散输入），也支持 `40001` 这类 Modicon 编号
 - 支持类型：Bool / Byte / Word / DWord / Int / DInt / Real（地址后缀只作默认建议，可手动改）
 - **Ctrl+S** 保存配置，**Ctrl+N** 添加标签，**Ctrl+B** 折叠侧边栏
 
 ### 3. 画面编辑器
 1. 工具栏切到 **「画面」**
 2. 点 **新建画面** 添加画面，顶部 tab 切换（双击就地重命名）
-3. 点 **数值 / 指示灯 / 文本** 添加组件
-4. 拖拽组件摆放，拖右下角缩放；选中后在上方属性栏绑定标签、改文字/字号
-5. 布局自动保存，重启后保留
+3. 从工具栏添加组件：**数值 / 指示灯 / 文本 / 棒图 / 按钮 / 矩形**
+4. 拖拽摆放（默认吸附 10px 网格），拖右下角缩放；选中后在上方属性栏绑定标签并调整样式
+5. 多选（Ctrl / Shift 点击）后可 左 / 右 / 上 / 下 / 水平居中 / 垂直居中 对齐，可置顶 / 置底
+6. 快捷键：`Del` 删除、`Ctrl+D` 复制、`Ctrl+C/V`、方向键微移（Shift 大步）、`Ctrl+Z/Y` 撤销重做、`Esc` 取消选择
+7. 点 **预览** 进入运行模式：隐藏编辑框与网格，**按钮组件可点击写值**
+8. 布局自动保存，重启后保留
 
 ### 4. PLCSIM 仿真
 
@@ -114,10 +123,15 @@ S7Scada/
 ├── App.xaml(.cs)               # 入口
 ├── Views/MainWindow.xaml(.cs)  # 主窗口 + JS/C# 消息桥
 ├── Services/
-│   ├── PlcService.cs           # PLC 通信（连接/扫描/读写）
-│   ├── AddressParser.cs        # S7 地址解析
-│   ├── TagConfigService.cs     # 标签配置持久化
-│   └── ScreenConfigService.cs  # 画面配置持久化
+│   ├── PlcService.cs            # 连接生命周期 / 扫描节拍 / 事件分发
+│   ├── IPlcDriver.cs            # 通信驱动接口 + 连接参数
+│   ├── S7Driver.cs              # S7 驱动（S7netplus）
+│   ├── ModbusDriver.cs          # Modbus TCP 驱动（NModbus）
+│   ├── TagValueCodec.cs         # 大端数值 ↔ 字节（两协议共用）
+│   ├── AddressParser.cs         # S7 地址解析
+│   ├── ModbusAddressParser.cs   # Modbus 地址解析
+│   ├── TagConfigService.cs      # 标签配置持久化
+│   └── ScreenConfigService.cs   # 画面配置持久化
 ├── Models/                     # PlcInfo / TagConfig
 └── wwwroot/                    # 前端（index.html / app.js / style.css）
 ```
@@ -140,6 +154,22 @@ S7Scada/
 - **连上但看不到数值**：确认标签 `scan_enabled` 为开（右键菜单可恢复）；确认地址在 PLC 中存在
 - **读不到 DB 数据**：TIA 里把 DB 的"优化的块访问"关闭并重新编译
 - **WebView2 报错**：安装微软 WebView2 Runtime
+
+## 🆕 更新日志
+
+### v1.2
+- **新增 Modbus TCP 支持**（与 S7 并列的第二协议，几乎所有品牌都能原生支持或经网关接入）
+  - 4 个标准寄存器区：保持寄存器 / 输入寄存器 / 线圈 / 离散输入
+  - 地址：`HR100` / `IR0` / `CO5` / `DI3`，以及 Modicon 编号 `40001` / `30001` / `10001` / `00001`
+  - 连接面板新增协议选择、端口、从站号；侧边栏说明卡随协议自动切换
+- **通信层重构**：抽出 `IPlcDriver` 接口，S7 逻辑迁入 `S7Driver`，新增 `ModbusDriver`；`PlcService` 只负责连接与扫描节拍
+- **画面编辑器增强**：组件 3 种 → 6 种（新增棒图 / 按钮 / 矩形）；属性栏按类型动态显示；新增网格吸附、多选对齐、层级、复制粘贴、方向键微移、撤销重做、预览模式
+- **读取优化**：分组读取改为区间合并分块，避免标签相距很远时的整段跨读与报文超限；单块失败不影响同组其他标签
+- **稳定性**：配置改为原子写；断线竞态收进通信锁；扫描改为固定节拍不漂移；底层异常统一转中文提示
+- **界面**：软件名简化为 **Pulse**；协议表单联动；对齐按钮补无障碍名称；颜色统一走设计令牌
+
+### v1.1
+- 更名 Pulse，界面重做，修复 JS/C# 消息桥与窗口边框问题
 
 ## 📄 许可
 

@@ -14,10 +14,15 @@ public enum TagQuality
     Good, Bad, Unknown
 }
 
-/// <summary>S7 内存区域</summary>
+/// <summary>内存区域：S7 的 DB/M/I/Q/T/C，以及 Modbus 的 4 个标准寄存器区</summary>
 public enum Area
 {
-    DB, M, I, Q, T, C
+    DB, M, I, Q, T, C,
+    // ── Modbus 区 ──
+    ModbusHoldingRegister,  // 4x 保持寄存器（读写，16 位）
+    ModbusInputRegister,    // 3x 输入寄存器（只读，16 位）
+    ModbusCoil,             // 0x 线圈（读写，位）
+    ModbusDiscreteInput     // 1x 离散输入（只读，位）
 }
 
 /// <summary>区域信息扩展</summary>
@@ -31,8 +36,19 @@ public static class AreaInfo
         Area.Q => "Q",
         Area.T => "T",
         Area.C => "C",
+        Area.ModbusHoldingRegister => "HR",
+        Area.ModbusInputRegister => "IR",
+        Area.ModbusCoil => "CO",
+        Area.ModbusDiscreteInput => "DI",
         _ => "?"
     };
+
+    /// <summary>是否为 Modbus 区域</summary>
+    public static bool IsModbus(this Area area) =>
+        area is Area.ModbusHoldingRegister or Area.ModbusInputRegister or Area.ModbusCoil or Area.ModbusDiscreteInput;
+
+    /// <summary>Modbus 位区域（线圈 / 离散输入）</summary>
+    public static bool IsModbusBit(this Area area) => area is Area.ModbusCoil or Area.ModbusDiscreteInput;
 
     /// <summary>S7.Net Area 映射</summary>
     public static S7.Net.DataType ToS7NetArea(this Area area) => area switch
@@ -66,6 +82,10 @@ public static class AreaInfo
         "Q" => Area.Q,
         "T" => Area.T,
         "C" => Area.C,
+        "HR" => Area.ModbusHoldingRegister,
+        "IR" => Area.ModbusInputRegister,
+        "CO" => Area.ModbusCoil,
+        "DI" => Area.ModbusDiscreteInput,
         _ => Area.M
     };
 }

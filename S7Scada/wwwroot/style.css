@@ -1,5 +1,5 @@
 /* ================================================================
-   Pulse S7 监控台 — Light/Dark Theme Support
+   Pulse — Light/Dark Theme Support
    ================================================================ */
 
 /* ── Variables ─────────────────────────────────────────────────── */
@@ -42,6 +42,7 @@
     --area-q:    #dc2626;
     --area-t:    #9333ea;
     --area-c:    #9333ea;
+    --area-modbus: #0f766e;
 
     /* Data-type colors（JS 通过 getCssVar 读取，随主题切换） */
     --type-bool:  #1d4ed8;
@@ -177,6 +178,7 @@
     --area-q:    #f4645f;
     --area-t:    #a78bfa;
     --area-c:    #a78bfa;
+    --area-modbus: #2dd4bf;
 
     /* Data-type colors（JS 通过 getCssVar 读取，随主题切换） */
     --type-bool:  #5b9bff;
@@ -1940,6 +1942,7 @@ select.field-input {
 .screen-toolbar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--sp-2);
     padding: var(--sp-2) var(--sp-4);
     background: var(--surface);
@@ -2128,4 +2131,166 @@ select.field-input {
     height: 8px;
     border-right: 2px solid var(--blue);
     border-bottom: 2px solid var(--blue);
+}
+
+/* ══ 画面编辑器：工具栏开关 / 属性栏 / 新增组件 ══════════════ */
+
+/* 工具栏分组分隔线 */
+.stb-sep {
+    width: 1px;
+    height: 20px;
+    background: var(--overlay);
+    margin: 0 var(--sp-1);
+    flex-shrink: 0;
+}
+
+/* 开关类按钮激活态（网格 / 吸附 / 预览） */
+.stb-toggle.active {
+    background: var(--blue-dim);
+    border-color: var(--btn-blue-border);
+    color: var(--blue);
+}
+
+/* 图标按钮（对齐等） */
+.icon-btn {
+    padding: 0 var(--sp-2);
+    min-width: var(--control-h-sm);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 工具栏末尾的操作提示（次要文字，保证 4.5:1 对比度） */
+.screen-toolbar-hint {
+    font-size: var(--fs-xs);
+    color: var(--text-3);
+    white-space: nowrap;
+    margin-left: var(--sp-1);
+}
+
+/* 属性栏：紧凑字段 / 颜色 / 清除按钮 */
+.prop-field-sm {
+    flex: 0 0 92px;
+    min-width: 76px;
+    max-width: 120px;
+}
+.prop-color-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--sp-1);
+}
+.prop-color {
+    width: 100%;
+    padding: 2px;
+    height: var(--control-h-sm);
+    cursor: pointer;
+}
+.prop-clear {
+    border: 1px solid var(--overlay);
+    background: var(--surface);
+    color: var(--text-3);
+    border-radius: var(--r-xs);
+    cursor: pointer;
+    font-size: var(--fs-sm);
+    line-height: 1;
+    padding: 4px 6px;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+.prop-clear:hover {
+    color: var(--text-1);
+    border-color: var(--border-strong);
+}
+.prop-clear:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+
+/* 画布：网格开关 / 预览模式 */
+.canvas.no-grid {
+    background-image: none;
+}
+.canvas.preview {
+    cursor: default;
+}
+.canvas.preview .widget,
+.canvas.preview .widget:hover {
+    cursor: default;
+    outline: none;
+}
+.canvas.preview .widget.selected {
+    outline: none;
+}
+.canvas.preview .widget .widget-resize-handle {
+    display: none;
+}
+
+/* 棒图 / 进度条 */
+.widget-bar {
+    display: flex;
+    align-items: center;
+    padding: 3px;
+    background: var(--surface);
+    border: 1px solid var(--overlay);
+    border-radius: var(--r-sm);
+    overflow: hidden;
+    position: relative;
+}
+.widget-bar-track {
+    position: relative;
+    flex: 1;
+    height: 100%;
+    background: var(--sunken);
+    border-radius: var(--r-xs);
+    overflow: hidden;
+}
+.widget-bar-fill {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 0%;
+    background: var(--blue);
+    transition: width 0.25s ease;
+}
+.widget-bar-label {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--text-1);
+    pointer-events: none;
+}
+
+/* 按钮 */
+.widget-button {
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    border: 1px solid var(--btn-blue-border);
+    background: var(--blue);
+    color: var(--btn-text-on-color);
+    border-radius: var(--r-sm);
+    font-family: inherit;
+    font-weight: 600;
+    cursor: pointer;
+    transition: filter 0.15s ease;
+}
+.widget-button:hover { filter: brightness(1.08); }
+.widget-button:active { filter: brightness(0.94); }
+.widget-button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+}
+/* 绑定 Bool 且当前为真时的点亮反馈 */
+.widget-button-on {
+    box-shadow: 0 0 0 3px var(--q-good-bg);
+}
+
+/* 矩形色块 */
+.widget-rect {
+    border-radius: var(--r-sm);
 }

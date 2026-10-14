@@ -1,19 +1,18 @@
 using System.Diagnostics;
 using System.Threading;
-using S7.Net;
 using S7Scada.Models;
 
 namespace S7Scada.Services;
 
 /// <summary>
-/// PLC 通信服务 - 基于 S7.Net
-/// 负责连接管理、批量读取、数据解析、断线重连
+/// PLC 通信服务：负责连接生命周期、扫描节拍与事件分发。
+/// 具体协议的读写交给 IPlcDriver（S7 / Modbus TCP），本类不感知协议细节。
 /// </summary>
 public class PlcService : IDisposable
 {
-    private Plc? _plc;
+    private IPlcDriver? _driver;
     private readonly object _lock = new();
-    private readonly object _commLock = new(); // 串行化 PLC 通信（扫描循环与手动刷新）
+    private readonly object _commLock = new(); // 串行化 PLC 通信（扫描循环与手动刷新 / 写入）
     private CancellationTokenSource? _cts;
     private Task? _scanTask;
     private volatile int _connecting; // 0=空闲, 1=正在连接（Interlocked 原子保护，防止并发双连）
@@ -30,22 +29,13 @@ public class PlcService : IDisposable
 
     // 属性
     public bool IsConnected => _connected;
-    public string Ip { get; private set; } = "192.168.0.1";
-    public CpuType Cpu { get; private set; } = CpuType.S71200;
-    public int Rack { get; private set; }
-    public int Slot { get; private set; } = 1;
+    public PlcConnectionSettings Settings { get; private set; } = new();
     public int ScanInterval { get; set; } = 100;
 
     private List<TagConfig> _tags = [];
 
-    /// <summary>设置连接参数</summary>
-    public void SetConnection(string ip, int rack = 0, int slot = 1, CpuType cpu = CpuType.S71200)
-    {
-        Ip = ip;
-        Rack = rack;
-        Slot = slot;
-        Cpu = cpu;
-    }
+    /// <summary>设置连接参数（协议、IP、端口、机架/插槽、CPU 等）</summary>
+    public void SetConnection(PlcConnectionSettings settings) => Settings = settings;
 
     /// <summary>设置要扫描的标签列表</summary>
     public void SetTags(List<TagConfig> tags)
@@ -94,7 +84,8 @@ public class PlcService : IDisposable
     /// <summary>立即手动刷新一次全部标签（不改变持续扫描的状态）</summary>
     public void RefreshNow()
     {
-        if (!_connected || _plc == null) return;
+        var driver = _driver;
+        if (!_connected || driver == null) return;
 
         _ = Task.Run(() =>
         {
@@ -102,7 +93,9 @@ public class PlcService : IDisposable
             lock (_lock) { snapshot = [.. _tags]; }
             if (snapshot.Count == 0) return;
 
-            var results = ScanTags(snapshot);
+            List<TagScanResult> results;
+            lock (_commLock) { results = ScanAll(driver, snapshot); }
+
             if (results.Count > 0)
                 DataUpdated?.Invoke(results);
         });
@@ -111,31 +104,14 @@ public class PlcService : IDisposable
     /// <summary>写入标签值到 PLC</summary>
     public (bool Success, string Message) WriteTag(TagConfig tag, object value)
     {
-        // 与扫描循环（ScanTags 已持 _commLock）共用串行锁，避免并发读写同一个 S7 连接
+        // 与扫描循环共用串行锁，避免并发读写同一条连接
         lock (_commLock)
         {
-            if (!_connected || _plc == null)
+            var driver = _driver;
+            if (!_connected || driver == null)
                 return (false, "PLC 未连接");
 
-            try
-            {
-                if (tag.DataType == TagDataType.Bool)
-                    return WriteBool(tag, value);
-
-                byte[]? data = ValueToBytes(value, tag.DataType);
-                if (data == null) return (false, "值转换失败");
-
-                if (tag.Area == Area.DB)
-                    _plc.WriteBytes(S7.Net.DataType.DataBlock, (ushort)tag.DbNumber, tag.ByteOffset, data);
-                else
-                    _plc.WriteBytes(tag.Area.ToS7NetArea(), (ushort)tag.DbNumber, tag.ByteOffset, data);
-
-                return (true, "写入成功");
-            }
-            catch (Exception ex)
-            {
-                return (false, ex.Message);
-            }
+            return driver.Write(tag, value);
         }
     }
 
@@ -148,6 +124,13 @@ public class PlcService : IDisposable
 
     // ── 私有方法 ────────────────────────────────────────
 
+    private static List<TagScanResult> ScanAll(IPlcDriver driver, List<TagConfig> tags)
+    {
+        string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+        var indexed = tags.Select((tag, idx) => (idx, tag)).ToList();
+        return driver.Scan(indexed, timestamp);
+    }
+
     private async Task ScanLoopAsync(CancellationToken ct)
     {
         try
@@ -159,16 +142,25 @@ public class PlcService : IDisposable
                 return;
             }
 
-            // 连接成功后持续扫描；连接断开时停止，不做自动重连
+            // 连接成功后持续扫描；连接断开时停止，不做自动重连。
+            // 采用基于 deadline 的固定节拍：等待时间 = 周期 - 本次扫描耗时，
+            // 避免"扫描耗时 + 间隔"逐周期累积造成的节拍漂移。
+            var clock = Stopwatch.StartNew();
+            long nextDueMs = clock.ElapsedMilliseconds + Math.Max(ScanInterval, 1);
             while (!ct.IsCancellationRequested && _connected)
             {
+                // 每轮读取当前周期，支持运行中热更新扫描间隔
+                long intervalMs = Math.Max(ScanInterval, 1);
+                var driver = _driver;
+
                 List<TagConfig> snapshot;
                 lock (_lock) { snapshot = [.. _tags]; }
 
-                if (snapshot.Count > 0)
+                if (driver != null && snapshot.Count > 0)
                 {
                     var sw = Stopwatch.StartNew();
-                    var results = ScanTags(snapshot);
+                    List<TagScanResult> results;
+                    lock (_commLock) { results = ScanAll(driver, snapshot); }
                     sw.Stop();
                     ScanTime?.Invoke(sw.Elapsed.TotalMilliseconds);
 
@@ -178,12 +170,22 @@ public class PlcService : IDisposable
 
                 // 连接已断开则停止扫描（不自动重连）
                 // 注意：不在此处触发 Disconnected 事件，统一由 DisconnectInternal 触发，避免双重触发
-                if (_plc == null || !_plc.IsConnected)
+                if (driver == null || !driver.IsConnected)
                 {
                     break;
                 }
 
-                await Task.Delay(ScanInterval, ct);
+                long now = clock.ElapsedMilliseconds;
+                if (now < nextDueMs)
+                {
+                    await Task.Delay((int)(nextDueMs - now), ct);
+                    nextDueMs += intervalMs;
+                }
+                else
+                {
+                    // 本次扫描已超过一个周期：重置节拍基准，不补偿积压
+                    nextDueMs = clock.ElapsedMilliseconds + intervalMs;
+                }
             }
         }
         catch (OperationCanceledException) { }
@@ -203,32 +205,38 @@ public class PlcService : IDisposable
         _errorAlreadyReported = false;
 
         _connected = false;
-        try { _plc?.Close(); } catch { }
-        _plc = null;
+
+        // 关闭连接与置空必须在 _commLock 内完成：
+        // 否则扫描/写入线程可能正持锁使用驱动，出现空引用或整组读取失败
+        lock (_commLock)
+        {
+            try { _driver?.Close(); } catch { }
+            try { _driver?.Dispose(); } catch { }
+            _driver = null;
+        }
 
         if (!errorAlreadyReported)
             Disconnected?.Invoke("Disconnected");
     }
 
     /// <summary>
-    /// 尝试连接一次。Open() 是阻塞调用，这里给它包一层 5 秒超时，
-    /// 避免 IP 不可达时界面一直卡在 "Connecting..." 等操作系统级的 TCP 超时（可达 20 秒+）。
+    /// 尝试连接一次。Open() 是阻塞调用，这里给它包一层超时，
+    /// 避免 IP 不可达时界面一直卡在 "Connecting..." 等操作系统级的 TCP 超时。
     /// 返回 true 表示连接成功。
     /// </summary>
     private async Task<bool> TryConnectOnceAsync(CancellationToken ct)
     {
-        const int connectTimeoutMs = 5000;
+        int timeoutMs = Math.Max(1000, Settings.ConnectTimeoutMs);
+        IPlcDriver? driver = null;
 
         try
         {
-            _plc = new Plc(Cpu, Ip, (short)Rack, (short)Slot)
-            {
-                ReadTimeout = 5000,
-                WriteTimeout = 5000
-            };
+            driver = CreateDriver(Settings.Protocol);
+            _driver = driver;
 
-            var openTask = Task.Run(() => _plc.Open(), ct);
-            var done = await Task.WhenAny(openTask, Task.Delay(connectTimeoutMs, ct));
+            var local = driver;
+            var openTask = Task.Run(() => local.Open(Settings), ct);
+            var done = await Task.WhenAny(openTask, Task.Delay(timeoutMs, ct));
 
             if (done == openTask)
             {
@@ -236,218 +244,43 @@ public class PlcService : IDisposable
                 _connected = true;
                 Connected?.Invoke();
 
-                // 异步获取 PLC 信息
-                _ = Task.Run(() => FetchPlcInfo(), ct);
+                // 异步获取设备信息
+                _ = Task.Run(() => PlcInfoReceived?.Invoke(local.GetInfo(Settings)), ct);
                 return true;
             }
 
             // 连接超时或用户已取消（取消时不上报错误）
-            try { _plc?.Close(); } catch { }
-            _plc = null;
             if (!ct.IsCancellationRequested)
             {
                 _errorAlreadyReported = true;
-                ConnectionError?.Invoke($"连接超时（{connectTimeoutMs / 1000}s 内无响应）");
+                ConnectionError?.Invoke($"连接超时（{timeoutMs / 1000} 秒内无响应）");
             }
             return false;
         }
         catch (Exception ex)
         {
-            try { _plc?.Close(); } catch { }
-            _plc = null;
             if (!ct.IsCancellationRequested)
             {
                 _errorAlreadyReported = true;
-                ConnectionError?.Invoke(ex.Message);
+                ConnectionError?.Invoke(IPlcDriver.FriendlyError(ex));
             }
             return false;
         }
-    }
-
-    // ── 批量扫描 ────────────────────────────────────────
-
-    private List<TagScanResult> ScanTags(List<TagConfig> tags)
-    {
-        // 按 (area, db_number) 分组
-        var groups = tags
-            .Select((tag, idx) => (idx, tag))
-            .Where(t => t.tag.ScanEnabled)
-            .GroupBy(t => (t.tag.Area, t.tag.DbNumber));
-
-        var results = new List<TagScanResult>();
-        string timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-
-        // 与手动刷新共用串行锁，避免并发读写 S7.Net 的连接
-        lock (_commLock)
+        finally
         {
-            foreach (var group in groups)
+            // 未连上时清理驱动（Open 可能仍阻塞在后台线程，Close 会让它抛错退出）
+            if (!_connected)
             {
-                try
-                {
-                    ReadGroup(group.Key.Area, group.Key.DbNumber, group.ToList(), results, timestamp);
-                }
-                catch (Exception ex)
-                {
-                    string errDesc = group.Key.Area == Area.DB
-                        ? $"DB{group.Key.DbNumber}"
-                        : $"{group.Key.Area.Prefix()} area";
-                    string fullErr = $"[{errDesc}] {ex.Message}";
-                    foreach (var (idx, tag) in group)
-                        results.Add(new TagScanResult(idx, null, TagQuality.Bad, timestamp, fullErr));
-                }
+                try { driver?.Close(); } catch { }
+                try { driver?.Dispose(); } catch { }
+                lock (_commLock) { _driver = null; }
             }
         }
-
-        return results;
     }
 
-    private void ReadGroup(Area area, int dbNum,
-        List<(int idx, TagConfig tag)> tagList,
-        List<TagScanResult> results, string timestamp)
-    {
-        var enabled = tagList.Where(t => t.tag.ScanEnabled).ToList();
-        if (enabled.Count == 0 || _plc == null) return;
-
-        int minOffset = enabled.Min(t => t.tag.ByteOffset);
-        int maxOffset = enabled.Max(t => t.tag.ByteOffset + t.tag.ByteLength);
-        int totalSize = Math.Max(maxOffset - minOffset, 4);
-
-        byte[]? rawData = ReadArea(area, dbNum, minOffset, totalSize);
-        if (rawData == null || rawData.Length == 0)
-            throw new Exception("返回数据为空");
-
-        foreach (var (idx, tag) in enabled)
-        {
-            int localOffset = tag.ByteOffset - minOffset;
-            int endOffset = localOffset + tag.ByteLength;
-
-            if (endOffset > rawData.Length)
-            {
-                results.Add(new TagScanResult(idx, null, TagQuality.Bad, timestamp,
-                    $"偏移超出数据范围 (need {endOffset}, got {rawData.Length})"));
-                continue;
-            }
-
-            var tagData = rawData[localOffset..endOffset];
-            object? value = ParseBytes(tagData, tag.DataType, tag.BitOffset);
-            var quality = value != null ? TagQuality.Good : TagQuality.Bad;
-            string err = value != null ? "" : "数据解析失败";
-            results.Add(new TagScanResult(idx, value, quality, timestamp, err));
-        }
-    }
-
-    private byte[]? ReadArea(Area area, int dbNum, int start, int size)
-    {
-        if (_plc == null) return null;
-
-        return area switch
-        {
-            Area.DB => _plc.ReadBytes(S7.Net.DataType.DataBlock, (ushort)dbNum, start, size),
-            _ => _plc.ReadBytes(area.ToS7NetArea(), (ushort)dbNum, start, size)
-        };
-    }
-
-    // ── 写入操作 ────────────────────────────────────────
-
-    private (bool, string) WriteBool(TagConfig tag, object value)
-    {
-        try
-        {
-            if (_plc == null) return (false, "PLC 未连接");
-
-            // 读-改-写
-            byte[] raw = tag.Area == Area.DB
-                ? _plc.ReadBytes(S7.Net.DataType.DataBlock, (ushort)tag.DbNumber, tag.ByteOffset, 1)
-                : _plc.ReadBytes(tag.Area.ToS7NetArea(), (ushort)tag.DbNumber, tag.ByteOffset, 1);
-
-            if (raw == null || raw.Length == 0)
-                return (false, "读取当前字节失败");
-
-            byte currentByte = raw[0];
-            bool boolVal = Convert.ToBoolean(value);
-            byte newByte = boolVal
-                ? (byte)(currentByte | (1 << tag.BitOffset))
-                : (byte)(currentByte & ~(1 << tag.BitOffset));
-
-            byte[] writeData = [newByte];
-            if (tag.Area == Area.DB)
-                _plc.WriteBytes(S7.Net.DataType.DataBlock, (ushort)tag.DbNumber, tag.ByteOffset, writeData);
-            else
-                _plc.WriteBytes(tag.Area.ToS7NetArea(), (ushort)tag.DbNumber, tag.ByteOffset, writeData);
-
-            return (true, "写入成功");
-        }
-        catch (Exception ex)
-        {
-            return (false, ex.Message);
-        }
-    }
-
-    // ── PLC 信息识别 ────────────────────────────────────
-
-    private void FetchPlcInfo()
-    {
-        var info = new PlcInfo();
-        try
-        {
-            if (_plc == null) return;
-
-            // S7netplus 0.20 does not expose ReadSZL; fall back to a default name
-            info.Module = Cpu switch
-            {
-                CpuType.S71200 => "S7-1200",
-                CpuType.S71500 => "S7-1500",
-                CpuType.S7300 => "S7-300",
-                CpuType.S7400 => "S7-400",
-                _ => "S7 PLC"
-            };
-
-            PlcInfoReceived?.Invoke(info);
-        }
-        catch
-        {
-            info.Module = "S7 PLC";
-            PlcInfoReceived?.Invoke(info);
-        }
-    }
-
-    // ── 字节解析 ────────────────────────────────────────
-
-    private static object? ParseBytes(byte[] data, TagDataType dataType, int bitOffset = 0)
-    {
-        try
-        {
-            return dataType switch
-            {
-                TagDataType.Bool when data.Length > 0 => (data[0] & (1 << bitOffset)) != 0,
-                TagDataType.Byte when data.Length > 0 => data[0],
-                TagDataType.Word when data.Length >= 2 => BitConverter.ToUInt16(data[..2].Reverse().ToArray()),
-                TagDataType.Int when data.Length >= 2 => BitConverter.ToInt16(data[..2].Reverse().ToArray()),
-                TagDataType.DWord when data.Length >= 4 => BitConverter.ToUInt32(data[..4].Reverse().ToArray()),
-                TagDataType.DInt when data.Length >= 4 => BitConverter.ToInt32(data[..4].Reverse().ToArray()),
-                TagDataType.Real when data.Length >= 4 => Math.Round(
-                    BitConverter.ToSingle(data[..4].Reverse().ToArray()), 6),
-                _ => null
-            };
-        }
-        catch { return null; }
-    }
-
-    private static byte[]? ValueToBytes(object value, TagDataType dataType)
-    {
-        try
-        {
-            return dataType switch
-            {
-                TagDataType.Byte => [(byte)(Convert.ToByte(value) & 0xFF)],
-                TagDataType.Word => BitConverter.GetBytes((ushort)(Convert.ToUInt16(value) & 0xFFFF)).Reverse().ToArray(),
-                TagDataType.Int => BitConverter.GetBytes(Convert.ToInt16(value)).Reverse().ToArray(),
-                TagDataType.DWord => BitConverter.GetBytes((uint)(Convert.ToUInt32(value) & 0xFFFFFFFF)).Reverse().ToArray(),
-                TagDataType.DInt => BitConverter.GetBytes(Convert.ToInt32(value)).Reverse().ToArray(),
-                TagDataType.Real => BitConverter.GetBytes(Convert.ToSingle(value)).Reverse().ToArray(),
-                _ => null
-            };
-        }
-        catch { return null; }
-    }
+    /// <summary>按协议标识创建驱动（只有两个协议，硬编码即可，不做插件化）</summary>
+    private static IPlcDriver CreateDriver(string? protocol) =>
+        string.Equals(protocol, "ModbusTcp", StringComparison.OrdinalIgnoreCase)
+            ? new ModbusDriver()
+            : new S7Driver();
 }

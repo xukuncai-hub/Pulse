@@ -20,6 +20,7 @@ public partial class MainWindow : Window
     private readonly TagConfigService _configService;
     private readonly ScreenConfigService _screenConfig = new();
     private readonly List<TagConfig> _tags = [];
+    private string _protocol = "S7"; // 当前选择的协议：S7 | ModbusTcp
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -335,6 +336,10 @@ public partial class MainWindow : Window
                 case "saveScreens":
                     HandleSaveScreens(msg);
                     break;
+                case "setProtocol":
+                    if (msg.TryGetProperty("protocol", out var protoProp2))
+                        _protocol = protoProp2.GetString() ?? "S7";
+                    break;
                 case "theme":
                     HandleTheme(msg);
                     break;
@@ -350,18 +355,39 @@ public partial class MainWindow : Window
 
     private async Task HandleConnect(JsonElement msg)
     {
-        var ip = msg.GetProperty("ip").GetString() ?? "192.168.0.1";
-        var rack = msg.GetProperty("rack").GetInt32();
-        var slot = msg.GetProperty("slot").GetInt32();
-        var scanInterval = msg.GetProperty("scanInterval").GetInt32();
+        var protocol = msg.TryGetProperty("protocol", out var protoProp) ? protoProp.GetString() : "S7";
+        _protocol = protocol ?? "S7";
 
-        var cpuStr = msg.TryGetProperty("cpu", out var cpuProp) ? cpuProp.GetString() : "S71200";
-        var cpu = Enum.TryParse<S7.Net.CpuType>(cpuStr, true, out var cpuType)
-            ? cpuType
-            : S7.Net.CpuType.S71200;
+        var ip = msg.TryGetProperty("ip", out var ipProp) ? ipProp.GetString() ?? "192.168.0.1" : "192.168.0.1";
+        var scanInterval = msg.TryGetProperty("scanInterval", out var siProp) && siProp.ValueKind == JsonValueKind.Number
+            ? siProp.GetInt32()
+            : 100;
 
-        _plc.SetConnection(ip, rack, slot, cpu);
-        _plc.ScanInterval = scanInterval;
+        var settings = new PlcConnectionSettings
+        {
+            Protocol = _protocol,
+            Ip = ip,
+            Port = msg.TryGetProperty("port", out var portProp) && portProp.ValueKind == JsonValueKind.Number
+                ? portProp.GetInt32()
+                : 502,
+            UnitId = (byte)(msg.TryGetProperty("unitId", out var uidProp) && uidProp.ValueKind == JsonValueKind.Number
+                ? Math.Clamp(uidProp.GetInt32(), 0, 247)
+                : 1)
+        };
+
+        // 机架 / 插槽 / CPU 仅 S7 需要
+        if (!_protocol.Equals("ModbusTcp", StringComparison.OrdinalIgnoreCase))
+        {
+            settings.Rack = msg.TryGetProperty("rack", out var rackProp) && rackProp.ValueKind == JsonValueKind.Number ? rackProp.GetInt32() : 0;
+            settings.Slot = msg.TryGetProperty("slot", out var slotProp) && slotProp.ValueKind == JsonValueKind.Number ? slotProp.GetInt32() : 1;
+            var cpuStr = msg.TryGetProperty("cpu", out var cpuProp) ? cpuProp.GetString() : "S71200";
+            settings.Cpu = Enum.TryParse<S7.Net.CpuType>(cpuStr, true, out var cpuType)
+                ? cpuType
+                : S7.Net.CpuType.S71200;
+        }
+
+        _plc.SetConnection(settings);
+        if (scanInterval >= 50) _plc.ScanInterval = scanInterval;
         _plc.SetTags([.. _tags]);
         SendToJs(new { type = "connectionChanged", connected = false, text = "连接中…", connecting = true });
         await _plc.ConnectAsync();
@@ -593,9 +619,12 @@ public partial class MainWindow : Window
         };
 
         // 地址只用于确定区域 / 偏移 / 位号；数据类型以显式选择为准
-        // （地址后缀推导出的类型仅作为弹窗里的默认建议，之前在这里被覆盖过，
-        //   导致 DB1.DBW2 选 Int、DB1.DBD4 选 Real 保存后被改回 Word/DWord）
-        if (!AddressParser.ParseToTag(address, tag))
+        // （地址后缀推导出的类型仅作为弹窗里的默认建议）
+        // 按当前协议选用对应的地址解析器：S7 用 AddressParser，Modbus 用 ModbusAddressParser
+        bool parsed = _protocol.Equals("ModbusTcp", StringComparison.OrdinalIgnoreCase)
+            ? ModbusAddressParser.ParseToTag(address, tag)
+            : AddressParser.ParseToTag(address, tag);
+        if (!parsed)
         {
             SendToJs(new { type = "error", text = $"地址无法解析：{address}" });
             return null;

@@ -43,7 +43,15 @@ public class TagConfigService
         path ??= DefaultConfigPath;
         var items = tags.Select(ConvertToJson).ToList();
         var json = JsonSerializer.Serialize(items, JsonOptions);
-        File.WriteAllText(path, json);
+        WriteAllTextAtomic(path, json);
+    }
+
+    /// <summary>原子写：先写临时文件再覆盖，避免写入中途崩溃/断电留下半截损坏的配置</summary>
+    private static void WriteAllTextAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, content);
+        File.Move(tmp, path, overwrite: true);
     }
 
     /// <summary>创建预置示例标签</summary>

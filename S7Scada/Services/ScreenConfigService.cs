@@ -20,6 +20,14 @@ public class ScreenConfigService
     public void Save(string json, string? path = null)
     {
         path ??= DefaultConfigPath;
-        File.WriteAllText(path, json);
+        WriteAllTextAtomic(path, json);
+    }
+
+    /// <summary>原子写：先写临时文件再覆盖，避免写入中途崩溃/断电留下半截损坏的画面配置</summary>
+    private static void WriteAllTextAtomic(string path, string content)
+    {
+        var tmp = path + ".tmp";
+        File.WriteAllText(tmp, content);
+        File.Move(tmp, path, overwrite: true);
     }
 }
