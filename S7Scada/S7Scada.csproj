@@ -15,10 +15,10 @@
     <AssemblyName>Pulse</AssemblyName>
     <RootNamespace>S7Scada</RootNamespace>
     <!-- 版本信息：写入 exe 文件属性（产品版本），"关于"弹窗也从此读取，避免两处不一致 -->
-    <Version>1.2.0</Version>
-    <AssemblyVersion>1.2.0.0</AssemblyVersion>
-    <FileVersion>1.2.0.0</FileVersion>
-    <InformationalVersion>1.2.0</InformationalVersion>
+    <Version>1.2.1</Version>
+    <AssemblyVersion>1.2.1.0</AssemblyVersion>
+    <FileVersion>1.2.1.0</FileVersion>
+    <InformationalVersion>1.2.1</InformationalVersion>
     <!-- 不要自动在版本号后追加 git 提交哈希，保持"产品版本"干净 -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Pulse</Product>
