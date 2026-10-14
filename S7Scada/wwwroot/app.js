@@ -1708,12 +1708,12 @@ function renderProps() {
 
     updateEditButtons(sel.length);
 
+    // 没有选中时也保持属性栏占位（显示提示文字），避免画布高度变化
     if (sel.length === 0) {
-        el.style.display = 'none';
+        el.innerHTML = '<span class="widget-props-hint">选中组件后，在此编辑它的属性</span>';
         if (btnDel) btnDel.disabled = true;
         return;
     }
-    el.style.display = 'flex';
     if (btnDel) btnDel.disabled = false;
 
     var html = '';
@@ -1855,6 +1855,7 @@ function snapVal(v) {
 
 (function setupCanvasInteractions() {
     var canvas = document.getElementById('screenCanvas');
+    var wrap = canvas.parentElement;   // .canvas-wrap：可滚动的容器
 
     canvas.addEventListener('mousedown', function (e) {
         if (state.preview) return;                       // 预览模式不进入编辑
@@ -1874,6 +1875,9 @@ function snapVal(v) {
             mode: handle ? 'resize' : 'move',
             startX: e.clientX,
             startY: e.clientY,
+            // 记录滚动位置：拖动过程中若容器滚动，坐标必须按滚动量补偿
+            startScrollLeft: wrap ? wrap.scrollLeft : 0,
+            startScrollTop: wrap ? wrap.scrollTop : 0,
             before: snapshotScreens(),
             // 记录全部选中组件的起始几何，实现整体移动 / 缩放
             items: getSelectedWidgets().map(function (it) {
@@ -1884,8 +1888,26 @@ function snapVal(v) {
 
     document.addEventListener('mousemove', function (e) {
         if (!dragState) return;
-        var dx = e.clientX - dragState.startX;
-        var dy = e.clientY - dragState.startY;
+        // 用"画布坐标"计算位移：鼠标位移 + 容器滚动量
+        var dx = e.clientX - dragState.startX + ((wrap ? wrap.scrollLeft : 0) - dragState.startScrollLeft);
+        var dy = e.clientY - dragState.startY + ((wrap ? wrap.scrollTop : 0) - dragState.startScrollTop);
+
+        var cw = canvas.clientWidth, ch = canvas.clientHeight;
+
+        if (dragState.mode === 'move') {
+            // 整组一起限制在画布范围内，避免拖出画布后组件"消失"，也避免组内相对位置被拆散
+            var minX = Infinity, minY = Infinity, maxR = -Infinity, maxB = -Infinity;
+            for (var k = 0; k < dragState.items.length; k++) {
+                var it0 = dragState.items[k];
+                minX = Math.min(minX, it0.x);
+                minY = Math.min(minY, it0.y);
+                maxR = Math.max(maxR, it0.x + it0.w);
+                maxB = Math.max(maxB, it0.y + it0.h);
+            }
+            dx = Math.max(-minX, Math.min(cw - maxR, dx));
+            dy = Math.max(-minY, Math.min(ch - maxB, dy));
+        }
+
         for (var i = 0; i < dragState.items.length; i++) {
             var it = dragState.items[i];
             var w = getWidget(it.id);
@@ -1894,8 +1916,9 @@ function snapVal(v) {
                 w.x = Math.max(0, snapVal(it.x + dx));
                 w.y = Math.max(0, snapVal(it.y + dy));
             } else {
-                w.w = Math.max(20, snapVal(it.w + dx));
-                w.h = Math.max(20, snapVal(it.h + dy));
+                // 缩放同样限制在画布内（右/下边界不越界）
+                w.w = Math.max(20, Math.min(cw - it.x, snapVal(it.w + dx)));
+                w.h = Math.max(20, Math.min(ch - it.y, snapVal(it.h + dy)));
             }
             var el = canvas.querySelector('.widget[data-id="' + it.id + '"]');
             if (el) {

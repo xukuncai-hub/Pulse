@@ -1962,8 +1962,9 @@ select.field-input {
 
 .widget-props {
     display: flex;
-    align-items: flex-end;
-    gap: var(--sp-4);
+    align-items: flex-start;
+    align-content: flex-start;
+    gap: var(--sp-3);
     padding: var(--sp-3) var(--sp-4);
     background: var(--surface);
     border: 1px solid var(--overlay);
@@ -1971,9 +1972,19 @@ select.field-input {
     margin-bottom: var(--sp-3);
     flex-shrink: 0;
     flex-wrap: wrap;
+    /* 固定高度：属性栏内容随选中组件的类型变化，高度若跟着变，
+       画布（flex:1）就会上下跳动，拖动时会造成"组件跑偏"的错觉。
+       固定高度 + 内部滚动即可消除这个跳动。 */
+    height: 118px;
+    overflow-y: auto;
 }
 .widget-props-title {
     align-self: center;
+}
+.widget-props-hint {
+    align-self: center;
+    font-size: var(--fs-sm);
+    color: var(--text-3);
 }
 .prop-field {
     flex: 1;
@@ -2118,8 +2129,8 @@ select.field-input {
     opacity: 0;
     transition: opacity 0.12s ease;
 }
-.widget.selected .widget-resize-handle,
-.widget:hover .widget-resize-handle {
+/* 只在选中时显示缩放把手：组件尺寸较小时，悬停即显示会让把手盖住大部分可拖动区域 */
+.widget.selected .widget-resize-handle {
     opacity: 1;
 }
 .widget-resize-handle::after {
