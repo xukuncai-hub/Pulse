@@ -45,7 +45,7 @@
 ## 🚀 快速开始
 
 ### 方式一：直接下载（推荐）
-从 [Releases](https://github.com/xukuncai-hub/s7-scada/releases) 下载 `Pulse-win-x64.zip`，解压后双击 `Pulse.exe` 即可运行。
+从 [Releases](https://github.com/xukuncai-hub/Pulse/releases) 下载 `Pulse-win-x64.zip`，解压后双击 `Pulse.exe` 即可运行。
 
 ### 方式二：源码构建
 ```bash
