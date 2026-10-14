@@ -163,8 +163,20 @@ public partial class MainWindow : Window
 
         // Now the frontend is listening; push the initial tag list and screens.
         PushWindowMetrics();
+        SendAppInfo();
         await PushTagsToJs();
         PushScreensToJs();
+    }
+
+    /// <summary>把应用名与版本推给前端：让"关于"里的版本跟程序集版本保持一致，不再两处硬编码</summary>
+    private void SendAppInfo()
+    {
+        try
+        {
+            var v = typeof(MainWindow).Assembly.GetName().Version;
+            SendToJs(new { type = "appInfo", name = "Pulse", version = v == null ? "" : $"{v.Major}.{v.Minor}" });
+        }
+        catch { }
     }
 
     /// <summary>把保存的画面配置推给前端</summary>

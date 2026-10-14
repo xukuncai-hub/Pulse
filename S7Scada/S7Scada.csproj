@@ -14,6 +14,15 @@
     <Platforms>x64;x86;ARM64</Platforms>
     <AssemblyName>Pulse</AssemblyName>
     <RootNamespace>S7Scada</RootNamespace>
+    <!-- 版本信息：写入 exe 文件属性（产品版本），"关于"弹窗也从此读取，避免两处不一致 -->
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <InformationalVersion>1.2.0</InformationalVersion>
+    <!-- 不要自动在版本号后追加 git 提交哈希，保持"产品版本"干净 -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Product>Pulse</Product>
+    <Company>xukuncai</Company>
     <!-- 应用图标（EXE 图标 + 运行时窗口/任务栏图标共用同一份多尺寸 ICO） -->
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Nullable>enable</Nullable>

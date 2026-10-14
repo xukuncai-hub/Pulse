@@ -123,6 +123,13 @@ window.onPlcInfo = function (info) {
     updatePlcInfoUI(info);
 };
 
+// 应用名与版本（由 C# 侧从程序集读取后下发，避免与 exe 版本两处不一致）
+window.onAppInfo = function (msg) {
+    if (!msg || !msg.version) return;
+    var el = document.querySelector('.about-ver');
+    if (el) el.textContent = (msg.name || 'Pulse') + ' · 版本 v' + msg.version;
+};
+
 window.onDataUpdated = function (results) {
     if (!results || !Array.isArray(results)) return;
     for (var i = 0; i < results.length; i++) {
@@ -174,6 +181,7 @@ if (window.chrome && window.chrome.webview) {
         switch (msg.type) {
             case 'connectionChanged': window.onConnectionChanged(msg.connected, msg.text, !!msg.connecting); break;
             case 'plcInfo':           window.onPlcInfo(msg.info); break;
+            case 'appInfo':           window.onAppInfo(msg); break;
             case 'dataUpdated':       window.onDataUpdated(msg.results); break;
             case 'scanTime':          window.onScanTime(msg.ms); break;
             case 'tagsChanged':       window.onTagsChanged(msg.tags); break;
