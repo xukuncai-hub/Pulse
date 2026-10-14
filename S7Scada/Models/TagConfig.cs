@@ -14,7 +14,7 @@ public enum TagQuality
     Good, Bad, Unknown
 }
 
-/// <summary>内存区域：S7 的 DB/M/I/Q/T/C，以及 Modbus 的 4 个标准寄存器区</summary>
+/// <summary>内存区域：S7 的 DB/M/I/Q/T/C，Modbus 的 4 个标准寄存器区，以及原始 TCP 透传的响应数据区</summary>
 public enum Area
 {
     DB, M, I, Q, T, C,
@@ -22,7 +22,9 @@ public enum Area
     ModbusHoldingRegister,  // 4x 保持寄存器（读写，16 位）
     ModbusInputRegister,    // 3x 输入寄存器（只读，16 位）
     ModbusCoil,             // 0x 线圈（读写，位）
-    ModbusDiscreteInput     // 1x 离散输入（只读，位）
+    ModbusDiscreteInput,    // 1x 离散输入（只读，位）
+    // ── 原始 TCP 透传区 ──
+    RawData                 // 响应字节流（按字节偏移取值）
 }
 
 /// <summary>区域信息扩展</summary>
@@ -40,6 +42,7 @@ public static class AreaInfo
         Area.ModbusInputRegister => "IR",
         Area.ModbusCoil => "CO",
         Area.ModbusDiscreteInput => "DI",
+        Area.RawData => "RAW",
         _ => "?"
     };
 
@@ -86,6 +89,7 @@ public static class AreaInfo
         "IR" => Area.ModbusInputRegister,
         "CO" => Area.ModbusCoil,
         "DI" => Area.ModbusDiscreteInput,
+        "RAW" => Area.RawData,
         _ => Area.M
     };
 }
@@ -103,6 +107,16 @@ public class TagConfig
     public string Group { get; set; } = "Default";
     public bool ScanEnabled { get; set; } = true;
     public string Comment { get; set; } = "";
+
+    // 工程量缩放：显示值 = 原始值 × Scale + Offset（Bool 不参与；默认 1/0 表示不缩放）
+    public double Scale { get; set; } = 1;
+    public double Offset { get; set; }
+
+    // 报警限值（按缩放后的工程量判断；null = 不启用该限）
+    public double? AlarmHigh { get; set; }
+    public double? AlarmLow { get; set; }
+
+    [JsonIgnore] public bool HasScaling => Scale != 1 || Offset != 0;
 
     // 运行时数据（不序列化）
     [JsonIgnore] public object? Value { get; set; }
@@ -136,4 +150,22 @@ public class TagConfigJson
     [JsonPropertyName("group")] public string Group { get; set; } = "Default";
     [JsonPropertyName("scan_enabled")] public bool ScanEnabled { get; set; } = true;
     [JsonPropertyName("comment")] public string Comment { get; set; } = "";
+    [JsonPropertyName("scale")] public double Scale { get; set; } = 1;
+    [JsonPropertyName("offset")] public double Offset { get; set; }
+    [JsonPropertyName("alarm_high")] public double? AlarmHigh { get; set; }
+    [JsonPropertyName("alarm_low")] public double? AlarmLow { get; set; }
+}
+
+/// <summary>一条报警事件（内存保存，重启清空）</summary>
+public class AlarmEvent
+{
+    public long Id { get; set; }
+    public string TagName { get; set; } = "";
+    /// <summary>"High" | "Low"</summary>
+    public string Kind { get; set; } = "High";
+    public double Value { get; set; }        // 触发时的显示值
+    public double Limit { get; set; }        // 触犯的限值
+    public string Time { get; set; } = "";   // 触发时间 HH:mm:ss
+    public bool Active { get; set; } = true; // 仍越限中
+    public bool Acked { get; set; }          // 已确认
 }

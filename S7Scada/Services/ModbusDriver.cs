@@ -1,3 +1,4 @@
+using System.IO.Ports;
 using System.Net.Sockets;
 using NModbus;
 using S7Scada.Models;
@@ -5,7 +6,9 @@ using S7Scada.Models;
 namespace S7Scada.Services;
 
 /// <summary>
-/// Modbus TCP 驱动（基于 NModbus）。
+/// Modbus 驱动（基于 NModbus），TCP 与 RTU 共用同一套寄存器读写逻辑，仅底层传输不同：
+///   - Modbus TCP：TCP 连接，报文走 MBAP 头；
+///   - Modbus RTU：串口（RS485 / RS232），报文带 CRC16 与帧间隔（由 NModbus 处理）。
 /// 支持 4 个标准寄存器区：线圈(CO) / 离散输入(DI) / 输入寄存器(IR) / 保持寄存器(HR)。
 /// 寄存器按大端（高字在前）解析，即 AB CD 字序。
 /// </summary>
@@ -15,18 +18,38 @@ public class ModbusDriver : IPlcDriver
     private const int MaxRegistersPerRequest = 120;
     private const int MaxBitsPerRequest = 1900;
 
-    private TcpClient? _tcp;
+    private TcpClient? _tcp;       // TCP 传输
+    private SerialPort? _serial;   // 串口传输（RTU）
     private IModbusMaster? _master;
     private PlcConnectionSettings _settings = new();
 
-    public bool IsConnected => _tcp?.Connected == true;
+    public bool IsConnected => _settings.IsSerial
+        ? _serial?.IsOpen == true
+        : _tcp?.Connected == true;
 
     public void Open(PlcConnectionSettings settings)
     {
         _settings = settings;
-        _tcp = new TcpClient();
-        _tcp.Connect(settings.Ip, settings.Port); // 阻塞；超时由 PlcService 包一层
-        _master = new ModbusFactory().CreateMaster(_tcp);
+        var factory = new ModbusFactory();
+
+        if (settings.IsSerial)
+        {
+            _serial = new SerialPort(settings.SerialPort, settings.BaudRate,
+                ParseParity(settings.Parity), settings.DataBits, ParseStopBits(settings.StopBits))
+            {
+                ReadTimeout = settings.IoTimeoutMs,
+                WriteTimeout = settings.IoTimeoutMs
+            };
+            _serial.Open();
+            _master = factory.CreateRtuMaster(new SerialStreamAdapter(_serial));
+        }
+        else
+        {
+            _tcp = new TcpClient();
+            _tcp.Connect(settings.Ip, settings.Port); // 阻塞；超时由 PlcService 包一层
+            _master = factory.CreateMaster(_tcp);
+        }
+
         _master.Transport.ReadTimeout = settings.IoTimeoutMs;
         _master.Transport.WriteTimeout = settings.IoTimeoutMs;
     }
@@ -35,15 +58,33 @@ public class ModbusDriver : IPlcDriver
     {
         try { _master?.Dispose(); } catch { }
         try { _tcp?.Close(); } catch { }
+        try { _serial?.Close(); } catch { }
         _master = null;
         _tcp = null;
+        _serial = null;
     }
 
     public void Dispose() => Close();
 
     public PlcInfo GetInfo(PlcConnectionSettings settings) => new()
     {
-        Module = $"Modbus TCP（从站 {settings.UnitId}）"
+        Module = settings.IsSerial
+            ? $"Modbus RTU（{settings.SerialPort} @ {settings.BaudRate}，从站 {settings.UnitId}）"
+            : $"Modbus TCP（从站 {settings.UnitId}）"
+    };
+
+    private static Parity ParseParity(string? value) => value?.ToUpperInvariant() switch
+    {
+        "EVEN" => Parity.Even,
+        "ODD" => Parity.Odd,
+        _ => Parity.None
+    };
+
+    private static StopBits ParseStopBits(string? value) => value?.ToUpperInvariant() switch
+    {
+        "TWO" => StopBits.Two,
+        "ONEPOINTFIVE" or "ONEANDAHALF" or "15" => StopBits.OnePointFive,
+        _ => StopBits.One
     };
 
     public List<TagScanResult> Scan(List<(int idx, TagConfig tag)> tags, string timestamp)

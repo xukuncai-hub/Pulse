@@ -15,10 +15,10 @@
     <AssemblyName>Pulse</AssemblyName>
     <RootNamespace>S7Scada</RootNamespace>
     <!-- 版本信息：写入 exe 文件属性（产品版本），"关于"弹窗也从此读取，避免两处不一致 -->
-    <Version>1.2.1</Version>
-    <AssemblyVersion>1.2.1.0</AssemblyVersion>
-    <FileVersion>1.2.1.0</FileVersion>
-    <InformationalVersion>1.2.1</InformationalVersion>
+    <Version>1.3.0</Version>
+    <AssemblyVersion>1.3.0.0</AssemblyVersion>
+    <FileVersion>1.3.0.0</FileVersion>
+    <InformationalVersion>1.3.0</InformationalVersion>
     <!-- 不要自动在版本号后追加 git 提交哈希，保持"产品版本"干净 -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <Product>Pulse</Product>
@@ -36,8 +36,10 @@
          以获得 CreateAsync(userDataFolder) 与 EventHandler 风格事件的现代 API 投影 -->
     <PackageReference Include="Microsoft.Web.WebView2" Version="1.0.4129.50" />
     <PackageReference Include="S7netplus" Version="0.20.*" />
-    <!-- Modbus TCP 驱动（NModbus） -->
+    <!-- Modbus TCP / RTU 驱动（NModbus） -->
     <PackageReference Include="NModbus" Version="3.0.*" />
+    <!-- 串口（Modbus RTU / RS485 / RS232） -->
+    <PackageReference Include="System.IO.Ports" Version="10.0.13" />
   </ItemGroup>
 
   <ItemGroup>

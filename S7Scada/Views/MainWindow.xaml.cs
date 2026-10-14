@@ -19,8 +19,9 @@ public partial class MainWindow : Window
     private readonly PlcService _plc;
     private readonly TagConfigService _configService;
     private readonly ScreenConfigService _screenConfig = new();
+    private readonly ConnectionConfigService _connConfigService = new();
     private readonly List<TagConfig> _tags = [];
-    private string _protocol = "S7"; // 当前选择的协议：S7 | ModbusTcp
+    private string _protocol = "S7"; // 当前选择的协议：S7 | ModbusTcp | ModbusRtu | RawTcp
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -164,8 +165,42 @@ public partial class MainWindow : Window
         // Now the frontend is listening; push the initial tag list and screens.
         PushWindowMetrics();
         SendAppInfo();
+        PushInitConfig();
         await PushTagsToJs();
         PushScreensToJs();
+    }
+
+    /// <summary>把上次保存的连接参数 + 本机可用串口列表推给前端回填表单</summary>
+    private void PushInitConfig()
+    {
+        try
+        {
+            var cfg = _connConfigService.Load();
+            SendToJs(new { type = "initConfig", connection = cfg, serialPorts = GetAvailableSerialPorts() });
+        }
+        catch { }
+    }
+
+    private static string[] GetAvailableSerialPorts()
+    {
+        try
+        {
+            return System.IO.Ports.SerialPort.GetPortNames()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderBy(port => port.StartsWith("COM", StringComparison.OrdinalIgnoreCase)
+                    && int.TryParse(port.AsSpan(3), out int number) ? number : int.MaxValue)
+                .ThenBy(port => port, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch
+        {
+            return [];
+        }
+    }
+
+    private void PushSerialPortsToJs()
+    {
+        SendToJs(new { type = "serialPortsChanged", serialPorts = GetAvailableSerialPorts() });
     }
 
     /// <summary>把应用名与版本推给前端：让"关于"里的版本跟程序集版本保持一致，不再两处硬编码</summary>
@@ -221,6 +256,7 @@ public partial class MainWindow : Window
         _plc.Connected += () => DispatcherQueue.TryEnqueue(OnPlcConnected);
         _plc.Disconnected += msg => DispatcherQueue.TryEnqueue(() => OnPlcDisconnected(msg));
         _plc.ConnectionError += err => DispatcherQueue.TryEnqueue(() => OnPlcError(err));
+        _plc.ScanFaulted += err => DispatcherQueue.TryEnqueue(() => OnPlcScanFaulted(err));
         _plc.PlcInfoReceived += info => DispatcherQueue.TryEnqueue(() => OnPlcInfo(info));
         _plc.DataUpdated += results => DispatcherQueue.TryEnqueue(() => OnDataUpdated(results));
         _plc.ScanTime += ms => DispatcherQueue.TryEnqueue(() => OnScanTime(ms));
@@ -256,6 +292,12 @@ public partial class MainWindow : Window
         SendToJs(new { type = "error", text = $"连接失败：{error}" });
     }
 
+    private void OnPlcScanFaulted(string error)
+    {
+        SendToJs(new { type = "connectionChanged", connected = false, text = $"扫描中断：{error}", connecting = false });
+        SendToJs(new { type = "error", text = $"PLC 扫描中断：{error}" });
+    }
+
     private void OnPlcInfo(PlcInfo info)
     {
         SendToJs(new { type = "plcInfo", info });
@@ -273,16 +315,31 @@ public partial class MainWindow : Window
             _tags[r.Index].Timestamp = r.Timestamp;
         }
 
-        // Build a compact update array
+        // Build a compact update array（数值标签按工程量缩放：显示值 = 原始值 × Scale + Offset）
         var updates = results.Select(r => new
         {
             index = r.Index,
-            value = r.Value,
+            value = ApplyScaling(r),
             quality = r.Quality.ToString(),
+            errorMessage = r.ErrorMessage,
             timestamp = r.Timestamp
         }).ToList();
 
         SendToJs(new { type = "dataUpdated", results = updates });
+    }
+
+    /// <summary>工程量缩放：原始值 → 显示值（仅数值标签、且设置了非默认缩放时）</summary>
+    private object? ApplyScaling(TagScanResult r)
+    {
+        if (r.Value == null || r.Index < 0 || r.Index >= _tags.Count) return r.Value;
+        var tag = _tags[r.Index];
+        if (!tag.HasScaling || tag.DataType == TagDataType.Bool) return r.Value;
+        try
+        {
+            double raw = Convert.ToDouble(r.Value);
+            return Math.Round(raw * tag.Scale + tag.Offset, 6);
+        }
+        catch { return r.Value; }
     }
 
     private void OnScanTime(double ms)
@@ -333,6 +390,12 @@ public partial class MainWindow : Window
                 case "loadConfig":
                     await HandleLoadConfig();
                     break;
+                case "importTags":
+                    await HandleImportTags();
+                    break;
+                case "exportTags":
+                    await HandleExportTags();
+                    break;
                 case "saveConfigAs":
                     HandleSaveConfigAs(msg);
                     break;
@@ -344,6 +407,9 @@ public partial class MainWindow : Window
                     break;
                 case "refreshNow":
                     _plc.RefreshNow();
+                    break;
+                case "refreshSerialPorts":
+                    PushSerialPortsToJs();
                     break;
                 case "saveScreens":
                     HandleSaveScreens(msg);
@@ -387,8 +453,23 @@ public partial class MainWindow : Window
                 : 1)
         };
 
+        // 串口参数（Modbus RTU / RS485 / RS232）
+        if (settings.IsSerial)
+        {
+            settings.SerialPort = GetString(msg, "serialPort") ?? "COM1";
+            settings.BaudRate = GetInt(msg, "baudRate") ?? 9600;
+            settings.DataBits = GetInt(msg, "dataBits") ?? 8;
+            settings.StopBits = GetString(msg, "stopBits") ?? "One";
+            settings.Parity = GetString(msg, "parity") ?? "None";
+        }
+        // 原始 TCP 透传：发送报文（十六进制）
+        else if (settings.IsRawTcp)
+        {
+            settings.SendHex = GetString(msg, "sendHex") ?? "";
+        }
+
         // 机架 / 插槽 / CPU 仅 S7 需要
-        if (!_protocol.Equals("ModbusTcp", StringComparison.OrdinalIgnoreCase))
+        if (_protocol.Equals("S7", StringComparison.OrdinalIgnoreCase))
         {
             settings.Rack = msg.TryGetProperty("rack", out var rackProp) && rackProp.ValueKind == JsonValueKind.Number ? rackProp.GetInt32() : 0;
             settings.Slot = msg.TryGetProperty("slot", out var slotProp) && slotProp.ValueKind == JsonValueKind.Number ? slotProp.GetInt32() : 1;
@@ -401,8 +482,99 @@ public partial class MainWindow : Window
         _plc.SetConnection(settings);
         if (scanInterval >= 50) _plc.ScanInterval = scanInterval;
         _plc.SetTags([.. _tags]);
+
+        // 记住本次表单参数（不管连接成败），下次启动自动回填
+        try
+        {
+            _connConfigService.Save(new ConnectionConfig
+            {
+                Protocol = _protocol,
+                Ip = ip,
+                Port = settings.Port,
+                UnitId = settings.UnitId,
+                Rack = settings.Rack,
+                Slot = settings.Slot,
+                Cpu = settings.Cpu.ToString(),
+                ScanInterval = scanInterval,
+                SerialPort = settings.SerialPort,
+                BaudRate = settings.BaudRate,
+                DataBits = settings.DataBits,
+                StopBits = settings.StopBits,
+                Parity = settings.Parity,
+                SendHex = settings.SendHex,
+                // RawTcp 的 port 字段存的就是 rawPort（前端 rawFields 端口框的值）
+                RawPort = settings.IsRawTcp ? settings.Port : _connConfigService.Load().RawPort
+            });
+        }
+        catch { }
+
         SendToJs(new { type = "connectionChanged", connected = false, text = "连接中…", connecting = true });
         await _plc.ConnectAsync();
+    }
+
+    /// <summary>从 CSV 导入标签（追加到当前列表，不动已有标签）</summary>
+    private async Task HandleImportTags()
+    {
+        var picker = new Windows.Storage.Pickers.FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeFilter.Add(".csv");
+
+        var file = await picker.PickSingleFileAsync();
+        if (file == null) return;
+
+        try
+        {
+            var (imported, skipped) = TagConfigService.ImportCsv(file.Path);
+            var existingNames = new HashSet<string>(_tags.Select(tag => tag.Name), StringComparer.OrdinalIgnoreCase);
+            int duplicateCount = imported.RemoveAll(tag => !existingNames.Add(tag.Name.Trim()));
+            skipped += duplicateCount;
+            if (imported.Count == 0)
+            {
+                string message = duplicateCount > 0
+                    ? "没有可导入的新标签，重复名称已跳过"
+                    : "CSV 中没有可导入的有效标签";
+                SendToJs(new { type = "error", text = message });
+                return;
+            }
+            _tags.AddRange(imported);
+            _plc.SetTags([.. _tags]);
+            await PushTagsToJs();
+            string msg = $"已导入 {imported.Count} 个标签";
+            if (skipped > 0) msg += $"（跳过 {skipped} 行无效或重名数据）";
+            SendToJs(new { type = "toast", text = msg, kind = "success" });
+        }
+        catch (Exception ex)
+        {
+            SendToJs(new { type = "error", text = $"导入失败：{ex.Message}" });
+        }
+    }
+
+    /// <summary>把当前标签列表导出为 CSV</summary>
+    private async Task HandleExportTags()
+    {
+        if (_tags.Count == 0)
+        {
+            SendToJs(new { type = "error", text = "当前没有标签可导出" });
+            return;
+        }
+
+        var picker = new Windows.Storage.Pickers.FileSavePicker();
+        InitializeWithWindow.Initialize(picker, WindowNative.GetWindowHandle(this));
+        picker.FileTypeChoices.Add("CSV 文件", [".csv"]);
+        picker.SuggestedFileName = "pulse_tags";
+
+        var file = await picker.PickSaveFileAsync();
+        if (file == null) return;
+
+        try
+        {
+            TagConfigService.ExportCsv([.. _tags], file.Path);
+            SendToJs(new { type = "toast", text = $"已导出 {_tags.Count} 个标签到：{file.Path}", kind = "success" });
+        }
+        catch (Exception ex)
+        {
+            SendToJs(new { type = "error", text = $"导出失败：{ex.Message}" });
+        }
     }
 
     private void HandleSaveScreens(JsonElement msg)
@@ -438,6 +610,11 @@ public partial class MainWindow : Window
         var tagProp = msg.GetProperty("tag");
         var tag = ParseTagFromJson(tagProp);
         if (tag == null) return;
+        if (HasDuplicateTagName(tag.Name))
+        {
+            SendToJs(new { type = "error", text = $"标签名称“{tag.Name}”已存在，请使用唯一名称" });
+            return;
+        }
 
         _tags.Add(tag);
         _plc.SetTags([.. _tags]);
@@ -452,10 +629,25 @@ public partial class MainWindow : Window
         var tagProp = msg.GetProperty("tag");
         var tag = ParseTagFromJson(tagProp);
         if (tag == null) return;
+        if (HasDuplicateTagName(tag.Name, index))
+        {
+            SendToJs(new { type = "error", text = $"标签名称“{tag.Name}”已存在，请使用唯一名称" });
+            return;
+        }
 
         _tags[index] = tag;
         _plc.SetTags([.. _tags]);
         _ = PushTagsToJs();
+    }
+
+    private bool HasDuplicateTagName(string name, int exceptIndex = -1)
+    {
+        for (int i = 0; i < _tags.Count; i++)
+        {
+            if (i != exceptIndex && string.Equals(_tags[i].Name.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     private void HandleDeleteTag(JsonElement msg)
@@ -479,6 +671,14 @@ public partial class MainWindow : Window
         {
             SendToJs(new { type = "error", text = $"{tag.Name}: 值无效" });
             return;
+        }
+
+        // 工程量反变换：用户输入的是显示值，写回 PLC 前要还原成原始值
+        if (tag.HasScaling && tag.DataType != TagDataType.Bool && tag.Scale != 0
+            && valueProp.ValueKind == JsonValueKind.Number)
+        {
+            double eng = valueProp.GetDouble();
+            valueProp = JsonSerializer.SerializeToElement((eng - tag.Offset) / tag.Scale);
         }
 
         object value;
@@ -605,6 +805,14 @@ public partial class MainWindow : Window
         _ = PushTagsToJs();
     }
 
+    // ── Helper: 读取 JSON 消息属性 ──────────────────────────
+
+    private static string? GetString(JsonElement msg, string name) =>
+        msg.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+    private static int? GetInt(JsonElement msg, string name) =>
+        msg.TryGetProperty(name, out var p) && p.ValueKind == JsonValueKind.Number ? p.GetInt32() : null;
+
     // ── Helper: Parse TagConfig from JSON ───────────────────
 
     private TagConfig? ParseTagFromJson(JsonElement prop)
@@ -627,15 +835,36 @@ public partial class MainWindow : Window
             DataType = dataType,
             Group = group,
             Comment = comment,
-            ScanEnabled = scanEnabled
+            ScanEnabled = scanEnabled,
+            Scale = prop.TryGetProperty("scale", out var sc) && sc.ValueKind == JsonValueKind.Number ? sc.GetDouble() : 1,
+            Offset = prop.TryGetProperty("offset", out var of) && of.ValueKind == JsonValueKind.Number ? of.GetDouble() : 0
         };
 
         // 地址只用于确定区域 / 偏移 / 位号；数据类型以显式选择为准
         // （地址后缀推导出的类型仅作为弹窗里的默认建议）
-        // 按当前协议选用对应的地址解析器：S7 用 AddressParser，Modbus 用 ModbusAddressParser
-        bool parsed = _protocol.Equals("ModbusTcp", StringComparison.OrdinalIgnoreCase)
-            ? ModbusAddressParser.ParseToTag(address, tag)
-            : AddressParser.ParseToTag(address, tag);
+        // 按当前协议选用对应的地址解析器
+        bool parsed;
+        if (_protocol.Equals("ModbusTcp", StringComparison.OrdinalIgnoreCase)
+            || _protocol.Equals("ModbusRtu", StringComparison.OrdinalIgnoreCase))
+        {
+            parsed = ModbusAddressParser.ParseToTag(address, tag);
+        }
+        else if (_protocol.Equals("RawTcp", StringComparison.OrdinalIgnoreCase))
+        {
+            // 原始 TCP：地址即响应数据中的字节偏移
+            parsed = int.TryParse(address, out var rawOffset) && rawOffset >= 0;
+            if (parsed)
+            {
+                tag.Area = Area.RawData;
+                tag.DbNumber = 0;
+                tag.ByteOffset = rawOffset;
+                tag.BitOffset = 0;
+            }
+        }
+        else
+        {
+            parsed = AddressParser.ParseToTag(address, tag);
+        }
         if (!parsed)
         {
             SendToJs(new { type = "error", text = $"地址无法解析：{address}" });
@@ -662,6 +891,8 @@ public partial class MainWindow : Window
             group = t.Group,
             comment = t.Comment,
             scanEnabled = t.ScanEnabled,
+            scale = t.Scale,
+            offset = t.Offset,
             value = t.Value,
             quality = t.Quality.ToString(),
             timestamp = t.Timestamp

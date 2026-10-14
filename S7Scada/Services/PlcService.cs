@@ -6,7 +6,7 @@ namespace S7Scada.Services;
 
 /// <summary>
 /// PLC 通信服务：负责连接生命周期、扫描节拍与事件分发。
-/// 具体协议的读写交给 IPlcDriver（S7 / Modbus TCP），本类不感知协议细节。
+/// 具体协议的读写交给 IPlcDriver（S7 / Modbus TCP / Modbus RTU / 原始 TCP），本类不感知协议细节。
 /// </summary>
 public class PlcService : IDisposable
 {
@@ -23,6 +23,7 @@ public class PlcService : IDisposable
     public event Action? Connected;
     public event Action<string>? Disconnected;
     public event Action<string>? ConnectionError;
+    public event Action<string>? ScanFaulted;
     public event Action<PlcInfo>? PlcInfoReceived;
     public event Action<List<TagScanResult>>? DataUpdated;
     public event Action<double>? ScanTime;
@@ -192,6 +193,8 @@ public class PlcService : IDisposable
         catch (Exception ex)
         {
             Debug.WriteLine($"PLC error: {ex.Message}");
+            _errorAlreadyReported = true;
+            ScanFaulted?.Invoke(IPlcDriver.FriendlyError(ex));
         }
 
         DisconnectInternal();
@@ -278,9 +281,14 @@ public class PlcService : IDisposable
         }
     }
 
-    /// <summary>按协议标识创建驱动（只有两个协议，硬编码即可，不做插件化）</summary>
-    private static IPlcDriver CreateDriver(string? protocol) =>
-        string.Equals(protocol, "ModbusTcp", StringComparison.OrdinalIgnoreCase)
-            ? new ModbusDriver()
-            : new S7Driver();
+    /// <summary>按协议标识创建驱动（协议固定几种，硬编码即可，不做插件化）</summary>
+    private static IPlcDriver CreateDriver(string? protocol)
+    {
+        if (string.Equals(protocol, "ModbusTcp", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(protocol, "ModbusRtu", StringComparison.OrdinalIgnoreCase))
+            return new ModbusDriver();
+        if (string.Equals(protocol, "RawTcp", StringComparison.OrdinalIgnoreCase))
+            return new RawTcpDriver();
+        return new S7Driver();
+    }
 }

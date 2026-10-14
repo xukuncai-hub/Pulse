@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <title>Pulse</title>
-    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="style.css?v=1.3.5">
 </head>
 <body>
     <!-- Toolbar -->
@@ -53,6 +56,22 @@
             </svg>
             保存
         </button>
+        <button class="tb-btn" onclick="importTagsCsv()" title="从 CSV 导入标签（追加到当前列表）">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            导入
+        </button>
+        <button class="tb-btn" onclick="exportTagsCsv()" title="把当前标签列表导出为 CSV">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+            </svg>
+            导出
+        </button>
         <div class="tb-sep"></div>
         <button class="tb-btn view-btn active" id="btnViewTable" onclick="switchView('table')" title="标签表视图">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -71,26 +90,40 @@
             </svg>
             画面
         </button>
-        <div class="tb-spacer"></div>
-        <button class="tb-btn tb-btn-theme" id="btnTheme" title="切换明 / 暗主题" aria-label="切换明暗主题">
-            <svg class="icon-sun" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                <circle cx="12" cy="12" r="5"/>
-                <line x1="12" y1="1" x2="12" y2="3"/>
-                <line x1="12" y1="21" x2="12" y2="23"/>
-                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
-                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
-                <line x1="1" y1="12" x2="3" y2="12"/>
-                <line x1="21" y1="12" x2="23" y2="12"/>
-                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
-                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+        <button class="tb-btn view-btn" id="btnViewTrend" onclick="switchView('trend')" title="历史趋势">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <polyline points="3 17 9 11 13 15 21 7"/>
+                <polyline points="15 7 21 7 21 13"/>
             </svg>
-            <svg class="icon-moon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none" aria-hidden="true">
-                <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z"/>
-            </svg>
+            趋势
         </button>
-        <div class="tb-status" id="toolbarStatus" role="status">
-            <div class="led-sm" id="toolbarStatusDot"></div>
-            <span id="toolbarStatusText">未连接</span>
+        <div class="tb-spacer"></div>
+        <div class="tb-actions-right">
+            <button class="tb-btn tb-btn-theme tb-btn-indicator" id="toolbarStatus" onclick="onToolbarStatusClick()" title="未连接" aria-label="未连接" role="status">
+                <span class="led-indicator" id="toolbarStatusDot"></span>
+            </button>
+            <button class="tb-btn tb-btn-theme" id="btnTheme" title="切换明 / 暗主题" aria-label="切换明 / 暗主题">
+                <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="5"/>
+                    <line x1="12" y1="1" x2="12" y2="3"/>
+                    <line x1="12" y1="21" x2="12" y2="23"/>
+                    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+                    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+                    <line x1="1" y1="12" x2="3" y2="12"/>
+                    <line x1="21" y1="12" x2="23" y2="12"/>
+                    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+                    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+                </svg>
+                <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="display:none" aria-hidden="true">
+                    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+                </svg>
+            </button>
+            <button class="tb-btn tb-btn-theme" id="btnSettings" onclick="openSettings()" title="设置" aria-label="设置" aria-haspopup="dialog" aria-controls="settingsModal">
+                <svg class="icon-settings" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                </svg>
+            </button>
         </div>
         <!-- 最小化/最大化/关闭 使用系统原生按钮（由 WinUI 绘制在右上角），
              工具栏右侧通过 --winctl-w 为其预留位置，避免与自绘内容重叠 -->
@@ -118,10 +151,12 @@
                             <label class="field-label" for="inputProtocol">通信协议</label>
                             <select class="field-input" id="inputProtocol" onchange="onProtocolChanged()">
                                 <option value="S7" selected>S7（西门子）</option>
-                                <option value="ModbusTcp">Modbus TCP（通用）</option>
+                                <option value="ModbusTcp">Modbus TCP（以太网）</option>
+                                <option value="ModbusRtu">Modbus RTU（RS485 / RS232）</option>
+                                <option value="RawTcp">原始 TCP/IP 透传</option>
                             </select>
                         </div>
-                        <div class="field">
+                        <div class="field" id="ipField">
                             <label class="field-label" for="inputIp">PLC IP 地址</label>
                             <input type="text" class="field-input mono" id="inputIp" value="192.168.0.1" placeholder="192.168.0.1"
                                    spellcheck="false" autocomplete="off" inputmode="decimal">
@@ -157,6 +192,75 @@
                                     <label class="field-label" for="inputUnit">从站号</label>
                                     <input type="number" class="field-input" id="inputUnit" value="1" min="0" max="247">
                                 </div>
+                            </div>
+                        </div>
+                        <div id="serialFields" style="display:none">
+                            <div class="field-row-2">
+                                <div class="field">
+                                    <label class="field-label" for="inputSerialPort">串口</label>
+                                    <div class="serial-port-control">
+                                        <input type="text" class="field-input mono" id="inputSerialPort" value="COM1" placeholder="COM1"
+                                               list="serialPortList" spellcheck="false" autocomplete="off">
+                                        <button type="button" class="btn btn-ghost btn-sm" onclick="refreshSerialPorts()" title="重新检测可用串口">检测</button>
+                                    </div>
+                                    <datalist id="serialPortList"></datalist>
+                                    <div class="field-hint" id="serialPortStatus" aria-live="polite"></div>
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="inputBaud">波特率</label>
+                                    <select class="field-input" id="inputBaud">
+                                        <option value="1200">1200</option>
+                                        <option value="2400">2400</option>
+                                        <option value="4800">4800</option>
+                                        <option value="9600" selected>9600</option>
+                                        <option value="19200">19200</option>
+                                        <option value="38400">38400</option>
+                                        <option value="57600">57600</option>
+                                        <option value="115200">115200</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="field-row-2">
+                                <div class="field">
+                                    <label class="field-label" for="inputDataBits">数据位</label>
+                                    <select class="field-input" id="inputDataBits">
+                                        <option value="7">7</option>
+                                        <option value="8" selected>8</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="inputStopBits">停止位</label>
+                                    <select class="field-input" id="inputStopBits">
+                                        <option value="One" selected>1</option>
+                                        <option value="OnePointFive">1.5</option>
+                                        <option value="Two">2</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="field-row-2">
+                                <div class="field">
+                                    <label class="field-label" for="inputParity">校验</label>
+                                    <select class="field-input" id="inputParity">
+                                        <option value="None" selected>无 (None)</option>
+                                        <option value="Even">偶校验 (Even)</option>
+                                        <option value="Odd">奇校验 (Odd)</option>
+                                    </select>
+                                </div>
+                                <div class="field">
+                                    <label class="field-label" for="inputRtuUnit">从站号</label>
+                                    <input type="number" class="field-input" id="inputRtuUnit" value="1" min="0" max="247">
+                                </div>
+                            </div>
+                        </div>
+                        <div id="rawFields" style="display:none">
+                            <div class="field">
+                                <label class="field-label" for="inputRawPort">端口</label>
+                                <input type="number" class="field-input" id="inputRawPort" value="5000" min="1" max="65535">
+                            </div>
+                            <div class="field">
+                                <label class="field-label" for="inputRawSend">发送报文（十六进制，可留空只接收）</label>
+                                <input type="text" class="field-input mono" id="inputRawSend" placeholder="例如：01 03 00 00 00 0A"
+                                       spellcheck="false" autocomplete="off">
                             </div>
                         </div>
                         <div class="field">
@@ -234,6 +338,42 @@
                     </ol>
                 </div>
 
+                <!-- Modbus RTU / 串口 Info（选择 Modbus RTU 时显示） -->
+                <div class="info-card info-card-amber" id="rtuCard" style="display:none">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <span>Modbus RTU 设置</span>
+                    </div>
+                    <ol class="info-list">
+                        <li>RS485 为 A/B 两线半双工；RS232 为 TX/RX/GND，二者均使用下方同一组串口参数</li>
+                        <li>波特率 / 数据位 / 停止位 / 校验需与从站设备完全一致（默认 9600-8-N-1）</li>
+                        <li>从站号需与设备地址一致；A/B 接反时通信会失败，可对调后再试</li>
+                        <li>寄存器地址写法与 Modbus TCP 一致：HR100 / 40001 / CO0</li>
+                    </ol>
+                </div>
+
+                <!-- 原始 TCP 透传 Info（选择原始 TCP/IP 时显示） -->
+                <div class="info-card info-card-amber" id="rawCard" style="display:none">
+                    <div class="info-card-head" role="button" tabindex="0">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                            <line x1="12" y1="9" x2="12" y2="13"/>
+                            <line x1="12" y1="17" x2="12.01" y2="17"/>
+                        </svg>
+                        <span>原始 TCP/IP 设置</span>
+                    </div>
+                    <ol class="info-list">
+                        <li>用于无标准协议的自定义设备（扫码枪 / 称重仪 / 串口服务器等）</li>
+                        <li>"发送报文"填十六进制，每次扫描前发送一次；留空则只接收设备主动上报的数据</li>
+                        <li>标签地址填响应数据中的字节偏移（0、4、8…），数据类型在标签里选择</li>
+                        <li>只取一帧数据：设备停止发送后按空闲超时（IO 超时的 1/5）判定帧结束</li>
+                    </ol>
+                </div>
+
                 <!-- Address Format -->
                 <div class="info-card info-card-blue">
                     <div class="info-card-head" role="button" tabindex="0">
@@ -255,7 +395,11 @@ T0    定时器  C0    计数器
 HR100 保持寄存器(读写)
 IR100 输入寄存器(只读)
 CO0   线圈(读写)  DI0 离散输入
-40001 / 30001 / 10001 / 00001</div>
+40001 / 30001 / 10001 / 00001
+—— Modbus RTU ——
+地址写法同 Modbus TCP
+—— 原始 TCP ——
+0 / 4 / 8  响应字节偏移</div>
                 </div>
 
                 <!-- Shortcuts -->
@@ -376,61 +520,91 @@ Ctrl+B 折叠侧边栏
             <div id="screensView" style="display:none">
                 <div class="screens-head">
                     <div class="screen-tabs" id="screenTabs"></div>
-                    <div class="screens-head-actions">
+                    <div class="screens-head-actions screen-edit-only">
                         <button class="btn btn-blue btn-sm" onclick="addScreen()" title="新增一个画面">
                             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                                 <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
                             </svg>
                             新建画面
                         </button>
-                        <button class="btn btn-ghost btn-sm" onclick="renameCurrentScreen()" title="重命名当前画面">重命名</button>
-                        <button class="btn btn-red btn-sm" onclick="deleteCurrentScreen()" title="删除当前画面">删除</button>
+                        <button class="btn btn-ghost btn-sm" id="btnRenameScreen" onclick="renameCurrentScreen()" title="重命名当前画面" disabled>重命名</button>
+                        <button class="btn btn-red btn-sm" id="btnDeleteScreen" onclick="deleteCurrentScreen()" title="删除当前画面" disabled>删除</button>
                     </div>
                 </div>
 
                 <div class="screen-toolbar" id="screenToolbar">
-                    <span class="screen-toolbar-label">添加</span>
-                    <button class="btn btn-blue btn-sm" onclick="addWidget('value')" title="数值显示组件">数值</button>
-                    <button class="btn btn-green btn-sm" onclick="addWidget('lamp')" title="指示灯组件">指示灯</button>
-                    <button class="btn btn-ghost btn-sm" onclick="addWidget('text')" title="文本组件">文本</button>
-                    <button class="btn btn-ghost btn-sm" onclick="addWidget('bar')" title="棒图 / 进度条组件">棒图</button>
-                    <button class="btn btn-ghost btn-sm" onclick="addWidget('button')" title="按钮组件（预览时点击可写值）">按钮</button>
-                    <button class="btn btn-ghost btn-sm" onclick="addWidget('rect')" title="矩形色块 / 装饰框">矩形</button>
-                    <div class="stb-sep"></div>
-                    <span class="screen-toolbar-label">编辑</span>
-                    <button class="btn btn-ghost btn-sm stb-toggle active" id="btnGrid" onclick="toggleGrid()" title="显示 / 隐藏网格">网格</button>
-                    <button class="btn btn-ghost btn-sm stb-toggle active" id="btnSnap" onclick="toggleSnap()" title="拖动 / 缩放吸附到网格">吸附</button>
-                    <div class="stb-sep"></div>
-                    <span class="screen-toolbar-label">对齐</span>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="left" onclick="alignWidgets('left')" title="左对齐" aria-label="左对齐" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="4" x2="3" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="6" y="14" width="7" height="4" rx="1"/></svg>
-                    </button>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="right" onclick="alignWidgets('right')" title="右对齐" aria-label="右对齐" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="21" y1="4" x2="21" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="11" y="14" width="7" height="4" rx="1"/></svg>
-                    </button>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="top" onclick="alignWidgets('top')" title="顶对齐" aria-label="顶对齐" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="3" x2="20" y2="3"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="6" width="4" height="7" rx="1"/></svg>
-                    </button>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="bottom" onclick="alignWidgets('bottom')" title="底对齐" aria-label="底对齐" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="21" x2="20" y2="21"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="11" width="4" height="7" rx="1"/></svg>
-                    </button>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="hcenter" onclick="alignWidgets('hcenter')" title="水平居中" aria-label="水平居中" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="3" x2="12" y2="21"/><rect x="4" y="6" width="16" height="4" rx="1"/><rect x="7" y="14" width="10" height="4" rx="1"/></svg>
-                    </button>
-                    <button class="btn btn-ghost btn-sm icon-btn" data-align="vcenter" onclick="alignWidgets('vcenter')" title="垂直居中" aria-label="垂直居中" disabled>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/></svg>
-                    </button>
-                    <div class="stb-sep"></div>
-                    <span class="screen-toolbar-label">层级</span>
-                    <button class="btn btn-ghost btn-sm" data-z="front" onclick="bringToFront()" title="置于顶层" disabled>置顶</button>
-                    <button class="btn btn-ghost btn-sm" data-z="back" onclick="sendToBack()" title="置于底层" disabled>置底</button>
-                    <span class="screen-toolbar-hint">拖动移动 · 右下角缩放</span>
-                    <div class="tb-spacer"></div>
-                    <button class="btn btn-ghost btn-sm stb-toggle" id="btnPreview" onclick="togglePreview()" title="预览（运行）模式：可点击按钮写值">预览</button>
-                    <button class="btn btn-red btn-sm" id="btnDeleteWidget" onclick="deleteSelectedWidget()" disabled>删除选中</button>
+                    <div class="screen-toolbar-group screen-edit-only">
+                        <span class="screen-toolbar-label">添加组件</span>
+                        <div class="screen-toolbar-actions">
+                            <button class="btn btn-blue btn-sm" onclick="addWidget('value')" title="添加数值显示组件">数值</button>
+                            <button class="btn btn-green btn-sm" onclick="addWidget('lamp')" title="添加指示灯组件">指示灯</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('text')" title="添加文本组件">文本</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('bar')" title="添加棒图 / 进度条组件">棒图</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('button')" title="添加按钮组件（浏览模式下点击可写值）">按钮</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('rect')" title="添加矩形色块 / 装饰框">矩形</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('gauge')" title="添加圆形仪表">仪表</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('switch')" title="添加开关（浏览模式下写入 Bool 标签）">开关</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('alarm')" title="添加状态 / 报警指示">报警</button>
+                            <button class="btn btn-ghost btn-sm" onclick="addWidget('trend')" title="添加迷你趋势图">迷你趋势</button>
+                        </div>
+                    </div>
+                    <div class="screen-toolbar-group screen-edit-only">
+                        <span class="screen-toolbar-label">画布</span>
+                        <div class="screen-toolbar-actions">
+                            <button class="btn btn-ghost btn-sm stb-toggle active" id="btnGrid" onclick="toggleGrid()" title="显示 / 隐藏网格">网格</button>
+                            <button class="btn btn-ghost btn-sm stb-toggle active" id="btnSnap" onclick="toggleSnap()" title="拖动 / 缩放吸附到网格">吸附</button>
+                        </div>
+                    </div>
+                    <div class="screen-toolbar-group screen-edit-only">
+                        <span class="screen-toolbar-label">对齐</span>
+                        <div class="screen-toolbar-actions">
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="left" onclick="alignWidgets('left')" title="左对齐" aria-label="左对齐" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="4" x2="3" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="6" y="14" width="7" height="4" rx="1"/></svg><span>左</span>
+                            </button>
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="right" onclick="alignWidgets('right')" title="右对齐" aria-label="右对齐" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="21" y1="4" x2="21" y2="20"/><rect x="6" y="6" width="12" height="4" rx="1"/><rect x="11" y="14" width="7" height="4" rx="1"/></svg><span>右</span>
+                            </button>
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="top" onclick="alignWidgets('top')" title="顶对齐" aria-label="顶对齐" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="3" x2="20" y2="3"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="6" width="4" height="7" rx="1"/></svg><span>顶</span>
+                            </button>
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="bottom" onclick="alignWidgets('bottom')" title="底对齐" aria-label="底对齐" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4" y1="21" x2="20" y2="21"/><rect x="6" y="6" width="4" height="12" rx="1"/><rect x="14" y="11" width="4" height="7" rx="1"/></svg><span>底</span>
+                            </button>
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="hcenter" onclick="alignWidgets('hcenter')" title="水平居中" aria-label="水平居中" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="12" y1="3" x2="12" y2="21"/><rect x="4" y="6" width="16" height="4" rx="1"/><rect x="7" y="14" width="10" height="4" rx="1"/></svg><span>水平居中</span>
+                            </button>
+                            <button class="btn btn-ghost btn-sm icon-btn" data-align="vcenter" onclick="alignWidgets('vcenter')" title="垂直居中" aria-label="垂直居中" disabled>
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="3" y1="12" x2="21" y2="12"/><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="7" width="4" height="10" rx="1"/></svg><span>垂直居中</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="screen-toolbar-group screen-edit-only">
+                        <span class="screen-toolbar-label">层级</span>
+                        <div class="screen-toolbar-actions">
+                            <button class="btn btn-ghost btn-sm" data-z="front" onclick="bringToFront()" title="置于顶层" disabled>置顶</button>
+                            <button class="btn btn-ghost btn-sm" data-z="back" onclick="sendToBack()" title="置于底层" disabled>置底</button>
+                        </div>
+                    </div>
+                    <div class="screen-toolbar-group screen-toolbar-group-mode">
+                        <span class="screen-toolbar-label">模式</span>
+                        <div class="screen-toolbar-actions">
+                            <button class="btn btn-ghost btn-sm stb-toggle" id="btnScreenMode" onclick="togglePreview()" aria-pressed="false" title="进入浏览模式并操作画面按钮">浏览</button>
+                            <button class="btn btn-red btn-sm screen-edit-only" id="btnDeleteWidget" onclick="deleteSelectedWidget()" disabled>删除选中</button>
+                        </div>
+                    </div>
+                    <span class="screen-toolbar-hint" id="screenModeHint">编辑模式：右键修改属性 · 拖动调整组件</span>
                 </div>
 
-                <div class="widget-props" id="widgetProps"></div>
+                <div class="modal-overlay widget-props-overlay" id="widgetProps" aria-hidden="true">
+                    <div class="modal widget-props-modal" role="dialog" aria-modal="false" aria-labelledby="widgetPropsTitle">
+                        <div class="modal-head">
+                            <h3 class="modal-title" id="widgetPropsTitle">修改组件属性</h3>
+                            <button class="modal-x" type="button" onclick="closeWidgetProps()" aria-label="关闭">&times;</button>
+                        </div>
+                        <div class="modal-body widget-props-body" id="widgetPropsContent"></div>
+                        <div class="modal-foot widget-props-foot">属性更改会自动保存 · 按 Esc 关闭</div>
+                    </div>
+                </div>
 
                 <div class="canvas-wrap">
                     <div class="canvas" id="screenCanvas"></div>
@@ -440,6 +614,36 @@ Ctrl+B 折叠侧边栏
                     </div>
                 </div>
             </div><!-- /#screensView -->
+
+            <!-- ── 历史趋势视图 ── -->
+            <div id="trendView" style="display:none">
+                <div class="trend-layout">
+                    <div class="card trend-sidebar">
+                        <div class="trend-sidebar-head">
+                            <span>选择标签（最多 6 个）</span>
+                            <button class="btn btn-ghost btn-sm" id="btnClearTrendSelection" onclick="clearTrendSelection()" title="清空选择" disabled>清空</button>
+                        </div>
+                        <div class="trend-tag-list" id="trendTagList"></div>
+                    </div>
+                    <div class="card trend-main">
+                        <div class="trend-controls">
+                            <label class="trend-range-label" for="trendRange">显示范围</label>
+                            <select class="field-input trend-range" id="trendRange" aria-label="趋势显示时间范围">
+                                <option value="60000">最近 1 分钟</option>
+                                <option value="300000">最近 5 分钟</option>
+                                <option value="600000" selected>最近 10 分钟</option>
+                            </select>
+                            <button class="btn btn-ghost btn-sm" id="btnClearTrendHistory" onclick="clearTrendHistory()" title="清除已选曲线的历史数据" disabled>清除历史</button>
+                        </div>
+                        <canvas id="trendCanvas"></canvas>
+                        <div class="trend-tooltip" id="trendTooltip" role="tooltip" aria-hidden="true"></div>
+                        <div class="trend-empty" id="trendEmpty">
+                            <div class="empty-title" id="trendEmptyTitle">历史趋势</div>
+                            <div class="empty-desc" id="trendEmptyDesc">勾选左侧标签后开始采样，最多保留最近 10 分钟数据</div>
+                        </div>
+                    </div>
+                </div>
+            </div><!-- /#trendView -->
         </main>
     </div>
 
@@ -453,7 +657,7 @@ Ctrl+B 折叠侧边栏
             <span id="statusPlcInfo"></span>
         </div>
         <div class="sb-right">
-            <span class="sb-item sb-about" id="btnAbout" onclick="openAbout()" title="关于软件">关于</span>
+            <span class="sb-item sb-about" id="btnAbout" onclick="openAbout()" title="关于 Pulse">关于</span>
             <span class="sb-sep">|</span>
             <span class="sb-item" id="statusScanTime">--</span>
             <span class="sb-sep">|</span>
@@ -492,6 +696,79 @@ Ctrl+B 折叠侧边栏
                 <path d="M19 6v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6m3 0V4a2 2 0 012-2h4a2 2 0 012 2v2"/>
             </svg>
             <span>删除标签</span>
+        </div>
+    </div>
+
+    <div class="modal-overlay settings-overlay" id="settingsModal" aria-hidden="true" onclick="if(event.target===this)closeSettings()">
+        <div class="modal modal-sm settings-modal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+            <div class="modal-head">
+                <h3 class="modal-title" id="settingsTitle">设置</h3>
+                <button class="modal-x" id="btnCloseSettings" onclick="closeSettings()" aria-label="关闭">&times;</button>
+            </div>
+            <div class="modal-body settings-body">
+                <!-- 外观 -->
+                <div class="settings-section-title">外观</div>
+                <div class="field">
+                    <label class="field-label" for="settingLanguage">语言 / Language</label>
+                    <select class="field-input" id="settingLanguage" onchange="setLanguage(this.value)">
+                        <option value="zh-CN">简体中文</option>
+                        <option value="en-US">English</option>
+                    </select>
+                </div>
+                <div class="field settings-option">
+                    <label class="check-label" for="settingCompact">
+                        <input type="checkbox" id="settingCompact" onchange="toggleCompact(this.checked)">
+                        <span class="check-box"></span>
+                        <span id="settingCompactLabel">紧凑界面</span>
+                    </label>
+                    <div class="field-hint" id="settingCompactHint">减少卡片和控件间距，保留文字大小</div>
+                </div>
+                <div class="field settings-option">
+                    <label class="check-label" for="settingFlash">
+                        <input type="checkbox" id="settingFlash" onchange="toggleFlash(this.checked)">
+                        <span class="check-box"></span>
+                        <span id="settingFlashLabel">数值变化闪烁高亮</span>
+                    </label>
+                    <div class="field-hint" id="settingFlashHint">数值更新时短暂高亮单元格，方便捕捉变化</div>
+                </div>
+                <!-- 数值显示 -->
+                <div class="settings-section-title">数值显示</div>
+                <div class="field">
+                    <label class="field-label" for="settingDecimals">小数位数</label>
+                    <select class="field-input" id="settingDecimals" onchange="applyDecimalsSetting()">
+                        <option value="-1">自动（保留原精度）</option>
+                        <option value="0">0 位</option>
+                        <option value="1">1 位</option>
+                        <option value="2">2 位</option>
+                        <option value="3">3 位</option>
+                        <option value="4">4 位</option>
+                    </select>
+                    <div class="field-hint">仅影响浮点数（Real）的显示精度</div>
+                </div>
+                <!-- 连接行为 -->
+                <div class="settings-section-title">连接行为</div>
+                <div class="field settings-option">
+                    <label class="check-label" for="settingAutoReconnect">
+                        <input type="checkbox" id="settingAutoReconnect" onchange="applyAutoReconnectSetting()">
+                        <span class="check-box"></span>
+                        <span id="settingAutoReconnectLabel">断线自动重连</span>
+                    </label>
+                    <div class="field-hint" id="settingAutoReconnectHint">连接中断后每 5 秒自动尝试重连</div>
+                </div>
+                <div class="field">
+                    <label class="field-label" for="settingConnTimeout">连接超时 (ms)</label>
+                    <select class="field-input" id="settingConnTimeout" onchange="applyConnTimeoutSetting()">
+                        <option value="2000">2000</option>
+                        <option value="3000">3000</option>
+                        <option value="5000">5000</option>
+                        <option value="10000">10000</option>
+                    </select>
+                    <div class="field-hint">等待 PLC 响应的最长时间</div>
+                </div>
+            </div>
+            <div class="modal-foot">
+                <button class="btn btn-blue" id="btnCloseSettingsFoot" onclick="closeSettings()">完成</button>
+            </div>
         </div>
     </div>
 
@@ -545,6 +822,16 @@ Ctrl+B 折叠侧边栏
                     <div class="field">
                         <label class="field-label" for="editorComment">备注</label>
                         <input type="text" class="field-input" id="editorComment" placeholder="可选说明" spellcheck="false" autocomplete="off">
+                    </div>
+                </div>
+                <div class="field-row-2">
+                    <div class="field">
+                        <label class="field-label" for="editorScale" title="显示值 = 原始值 × 缩放 + 偏移（1 表示不缩放）">缩放系数</label>
+                        <input type="number" class="field-input" id="editorScale" value="1" step="any" title="显示值 = 原始值 × 缩放 + 偏移">
+                    </div>
+                    <div class="field">
+                        <label class="field-label" for="editorOffset" title="显示值 = 原始值 × 缩放 + 偏移（0 表示不偏移）">偏移量</label>
+                        <input type="number" class="field-input" id="editorOffset" value="0" step="any" title="显示值 = 原始值 × 缩放 + 偏移">
                     </div>
                 </div>
                 <div class="field">
@@ -618,13 +905,13 @@ Ctrl+B 折叠侧边栏
                     </svg>
                 </div>
                 <div class="about-name">Pulse</div>
-                <div class="about-ver">Pulse · 版本 v1.2.1</div>
-                <div class="about-desc">西门子 S7 / Modbus TCP 上位机监控软件<br>现场脉搏，实时可见</div>
+                <div class="about-ver">Pulse · 版本 v1.3.0</div>
+                <div class="about-desc">西门子 S7 / Modbus / 原始 TCP 上位机监控软件<br>现场脉搏，实时可见</div>
                 <div class="about-rows">
-                    <div class="about-row"><span class="about-k">名称</span><span class="about-v">Pulse（脉动）</span></div>
+                    <div class="about-row"><span class="about-k">名称</span><span class="about-v">Pulse</span></div>
                     <div class="about-row"><span class="about-k">作者</span><span class="about-v">xukuncai</span></div>
                     <div class="about-row"><span class="about-k">邮箱</span><span class="about-v">xukuncai0001@gmail.com</span></div>
-                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WinUI 3 / WebView2 / S7netplus / NModbus</span></div>
+                    <div class="about-row"><span class="about-k">技术栈</span><span class="about-v">C# / WinUI 3 / WebView2 / S7netplus / NModbus / System.IO.Ports</span></div>
                     <div class="about-row"><span class="about-k">源码</span>
                         <a class="about-link" href="https://github.com/xukuncai-hub/Pulse" target="_blank" rel="noopener noreferrer">github.com/xukuncai-hub/Pulse</a>
                     </div>
@@ -637,6 +924,6 @@ Ctrl+B 折叠侧边栏
         </div>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=1.3.5"></script>
 </body>
 </html>
